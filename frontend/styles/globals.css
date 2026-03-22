@@ -1,0 +1,536 @@
+@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+html,
+body {
+  height: 100%;
+  background-color: #0a0a0f;
+  color: #e2e2f0;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#__next {
+  height: 100%;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4c1d95 #0f0f1a;
+}
+
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #0f0f1a;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #4c1d95;
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #7c3aed;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+code,
+pre,
+.font-mono {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+/* ── Component helpers ────────────────────────────────────────────────────── */
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg
+           bg-accent text-white font-medium text-sm
+           hover:bg-accent-hover active:scale-95
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg
+           text-gray-400 font-medium text-sm border border-surface-600
+           hover:border-accent-light hover:text-accent-light
+           transition-all duration-150;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg
+           bg-red-700 text-white font-medium text-sm
+           hover:bg-red-600 active:scale-95
+           transition-all duration-150;
+  }
+
+  .card {
+    @apply rounded-xl bg-surface-900 border border-surface-700 p-6;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-lg bg-surface-800 border border-surface-600
+           text-gray-100 placeholder-gray-600 text-sm
+           focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
+           transition-colors;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+}
+
+/* ── Monaco editor wrapper ────────────────────────────────────────────────── */
+.monaco-wrapper {
+  height: 100%;
+  width: 100%;
+}
+
+.monaco-wrapper .overflow-guard,
+.monaco-wrapper .monaco-editor,
+.monaco-wrapper .monaco-editor-background {
+  background-color: #0d0d18 !important;
+}
+
+/* ── Message animations ───────────────────────────────────────────────────── */
+.msg-enter {
+  animation: slideUp 0.2s ease forwards;
+}
+
+/* ── Resize divider ───────────────────────────────────────────────────────── */
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body.resizing-row,
+body.resizing-row * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BLIP — POSTER THEME  (Catch Me If You Can × Marvel)
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Vertical animated panel lines ─────────────────────────────────────── */
+.panel-line {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(220, 38, 38, 0.55) 15%,
+    rgba(220, 38, 38, 0.55) 85%,
+    transparent 100%
+  );
+  animation: lineGrow 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.25s forwards;
+  z-index: 2;
+  pointer-events: none;
+}
+.panel-line-2 { animation-delay: 0.45s; }
+
+@keyframes lineGrow {
+  from { height: 0; opacity: 0; }
+  to   { height: 100%; opacity: 1; }
+}
+
+/* ── Scan line ──────────────────────────────────────────────────────────── */
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, rgba(220,38,38,0.25) 40%, rgba(251,191,36,0.15) 60%, transparent 100%);
+  animation: scanMove 5s ease-in-out 1.5s infinite;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+}
+
+@keyframes scanMove {
+  0%   { top: -2px;  opacity: 0; }
+  3%   { opacity: 1; }
+  97%  { opacity: 1; }
+  100% { top: 100%;  opacity: 0; }
+}
+
+/* ── Film grain ─────────────────────────────────────────────────────────── */
+.film-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.035;
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  background-repeat: repeat;
+}
+
+/* ── Giant poster words ─────────────────────────────────────────────────── */
+.poster-line {
+  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Black', sans-serif;
+  font-size: clamp(2.8rem, 7vw, 6.5rem);
+  letter-spacing: 0.04em;
+  display: block;
+}
+.poster-char {
+  display: inline-block;
+  opacity: 0;
+  animation: charSlam 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes charSlam {
+  0%   { opacity: 0; transform: scale(2.4) translateY(-16px) skewX(-14deg); filter: blur(16px); }
+  32%  { opacity: 1; filter: blur(0);  transform: scale(0.84) translateY(5px) skewX(3deg);  }
+  60%  { transform: scale(1.08) translateY(-2px) skewX(-0.5deg); }
+  80%  { transform: scale(0.97) translateY(1px); }
+  100% { opacity: 1; transform: scale(1) translateY(0) skewX(0deg); filter: blur(0); }
+}
+
+/* ── Snap particles ─────────────────────────────────────────────────────── */
+.snap-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.7);
+  opacity: 0;
+  animation: snapAppear 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+
+@keyframes snapAppear {
+  0%   { transform: scale(0);   opacity: 0; }
+  60%  { transform: scale(1.6); opacity: 1; }
+  100% { transform: scale(1);   opacity: 0.65; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Tab underline slide ────────────────────────────────────────────────── */
+.tab-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: #dc2626;
+  animation: fadeIn 0.2s ease;
+}
+
+/* ── Blip form inputs ───────────────────────────────────────────────────── */
+@layer components {
+  .blip-input {
+    @apply w-full px-4 py-3 rounded-lg text-gray-100 placeholder-gray-700 text-sm
+           transition-colors duration-150;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .blip-input:focus {
+    outline: none;
+    border-color: rgba(220,38,38,0.5);
+    box-shadow: 0 0 0 2px rgba(220,38,38,0.12);
+  }
+
+  .blip-btn {
+    @apply inline-flex items-center justify-center gap-2 w-full px-5 py-3 rounded-lg
+           font-semibold text-sm uppercase tracking-widest
+           transition-all duration-150 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .blip-btn-red {
+    @apply blip-btn text-white;
+    background: #dc2626;
+  }
+  .blip-btn-red:hover:not(:disabled) { background: #b91c1c; }
+
+  .blip-btn-gold {
+    @apply blip-btn text-black;
+    background: #f59e0b;
+  }
+  .blip-btn-gold:hover:not(:disabled) { background: #d97706; }
+
+  .blip-type-btn {
+    @apply py-2.5 rounded-lg border text-sm font-medium transition-all duration-150;
+    background: rgba(255,255,255,0.03);
+    border-color: rgba(255,255,255,0.08);
+    color: #6b7280;
+  }
+  .blip-type-btn:hover { border-color: rgba(255,255,255,0.18); color: #d1d5db; }
+  .blip-type-btn.active {
+    border-color: rgba(220,38,38,0.6);
+    background: rgba(220,38,38,0.1);
+    color: #fca5a5;
+  }
+
+  .blip-pill {
+    @apply px-4 py-1.5 rounded-full text-sm font-mono font-medium border transition-all duration-150;
+    border-color: rgba(255,255,255,0.08);
+    color: #6b7280;
+  }
+  .blip-pill:hover { border-color: rgba(255,255,255,0.2); color: #d1d5db; }
+  .blip-pill.active {
+    border-color: rgba(245,158,11,0.6);
+    background: rgba(245,158,11,0.1);
+    color: #fcd34d;
+  }
+}
+
+/* ── Tooltip ──────────────────────────────────────────────────────────────── */
+[data-tip] {
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THANOS SNAP — Room-expired cinematic screen
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Root ── */
+.snap-root {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: #02020a;
+  overflow: hidden; z-index: 9999;
+}
+.snap-root--shook {
+  animation: snapShake 0.55s cubic-bezier(0.36,0.07,0.19,0.97) both;
+}
+@keyframes snapShake {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  10%     { transform: translate(-6px,-3px) rotate(-0.9deg); }
+  22%     { transform: translate( 6px, 3px) rotate( 0.9deg); }
+  34%     { transform: translate(-4px, 2px) rotate(-0.4deg); }
+  46%     { transform: translate( 4px,-2px) rotate( 0.4deg); }
+  60%     { transform: translate(-2px, 2px); }
+  76%     { transform: translate( 2px,-1px); }
+  88%     { transform: translate(-1px, 1px); }
+}
+
+/* ── Multi-colour flash — fires at 1.0s to match snapped state ── */
+.snap-flash {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 42%,
+    #ffffff                    0%,
+    rgba(251,191,36,0.95)     14%,
+    rgba(239, 68, 68,0.70)    32%,
+    rgba(168, 85,247,0.40)    52%,
+    transparent               72%
+  );
+  animation: snapFlash 0.85s cubic-bezier(0.16,1,0.3,1) 1.0s both;
+  pointer-events: none; z-index: 20;
+}
+@keyframes snapFlash {
+  0%   { opacity: 0; transform: scale(0.15); filter: blur(24px); }
+  8%   { opacity: 1; transform: scale(1.0);  filter: blur(0px);  }
+  22%  { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(2.4);  filter: blur(50px); }
+}
+
+/* ── Ambient glow rings ── */
+.snap-ring { position: absolute; border-radius: 50%; pointer-events: none; }
+.snap-ring-1 {
+  width: 440px; height: 440px;
+  background: radial-gradient(ellipse, rgba(245,158,11,0.08) 0%, transparent 70%);
+  animation: ringPulse 2.8s ease-in-out 0.2s infinite alternate;
+}
+.snap-ring-2 {
+  width: 260px; height: 260px;
+  background: radial-gradient(ellipse, rgba(220,38,38,0.07) 0%, transparent 70%);
+  animation: ringPulse 2.0s ease-in-out 0.6s infinite alternate-reverse;
+}
+@keyframes ringPulse {
+  from { opacity: 0.3; transform: scale(0.87); }
+  to   { opacity: 1.0; transform: scale(1.13); }
+}
+
+/* ── Gauntlet shell — faster 3-animation chain ── */
+.snap-gauntlet-shell {
+  position: absolute; top: 50%; left: 50%;
+  z-index: 10; pointer-events: none;
+  animation:
+    gauntletIn       0.6s  cubic-bezier(0.34,1.56,0.64,1)   0.1s both,
+    gauntletSnap     0.28s cubic-bezier(0.36,0,0.66,-0.55)  1.0s both,
+    gauntletDissolve 1.15s cubic-bezier(0.4,0,1,1)          1.6s both;
+}
+@keyframes gauntletIn {
+  0%   { opacity: 0; transform: translate(-50%,-52%) scale(0.22) rotate(-18deg) translateY(24px); }
+  55%  { opacity: 1; transform: translate(-50%,-52%) scale(1.12) rotate(4deg); }
+  100% { opacity: 1; transform: translate(-50%,-52%) scale(1)    rotate(0deg); }
+}
+@keyframes gauntletSnap {
+  0%   { transform: translate(-50%,-52%) scale(1)    rotate(0deg);
+         filter: drop-shadow(0 0 10px rgba(251,191,36,0.5)); }
+  28%  { transform: translate(-50%, calc(-52% - 22px)) scale(1.24) rotate(-11deg);
+         filter: drop-shadow(0 0 50px rgba(255,255,255,1)) drop-shadow(0 0 90px rgba(251,191,36,1)); }
+  72%  { transform: translate(-50%, calc(-52% + 7px))  scale(0.92) rotate(6deg);
+         filter: drop-shadow(0 0 14px rgba(251,191,36,0.5)); }
+  100% { transform: translate(-50%,-52%) scale(1)    rotate(0deg);
+         filter: drop-shadow(0 0 10px rgba(251,191,36,0.5)); }
+}
+@keyframes gauntletDissolve {
+  0%   { opacity: 1;   transform: translate(-50%,-52%)              scale(1);
+         filter: blur(0px) brightness(1); }
+  18%  { opacity: 0.85; transform: translate(-50%, calc(-52% - 3%)) scale(1.06);
+         filter: blur(1px) brightness(1.3); }
+  100% { opacity: 0;   transform: translate(-50%, calc(-52% - 15%)) scale(0.5);
+         filter: blur(22px) brightness(0.4); }
+}
+
+/* ── SVG sizing for 110×150 viewBox ── */
+.snap-svg {
+  width: 136px; height: 186px; display: block;
+  filter:
+    drop-shadow(0 0 18px rgba(251,191,36,0.55))
+    drop-shadow(0  3px 10px rgba(0,0,0,0.85));
+}
+
+/* ── Stone charge — brightness pump timed via CSS var ── */
+.snap-stone-gem {
+  animation: stoneCharge 0.38s cubic-bezier(0.4,0,1,1) var(--stone-delay, 0.5s) both;
+}
+@keyframes stoneCharge {
+  0%   { filter: brightness(0.9) saturate(1);   }
+  55%  { filter: brightness(1.7) saturate(1.6); }
+  100% { filter: brightness(2.4) saturate(2.2); }
+}
+
+/* ── Charge sweep line — climbs gauntlet before snap ── */
+.snap-charge-sweep {
+  position: absolute; left: 0; right: 0; height: 3px;
+  background: linear-gradient(to right, transparent 5%, rgba(251,191,36,0.85) 50%, transparent 95%);
+  pointer-events: none; z-index: 11;
+  animation: chargeSweep 0.7s ease-in 0.25s both;
+}
+@keyframes chargeSweep {
+  0%   { transform: translateY(170px); opacity: 0; }
+  15%  { opacity: 0.9; }
+  85%  { opacity: 0.7; }
+  100% { transform: translateY(-20px); opacity: 0; }
+}
+
+/* ── Snap spark burst (SVG overlays) ── */
+.snap-spark-bloom {
+  animation: sparkBloom 0.55s cubic-bezier(0.16,1,0.3,1) both;
+}
+@keyframes sparkBloom {
+  0%   { opacity: 0; transform: scale(0.1); }
+  18%  { opacity: 1; }
+  100% { opacity: 0; transform: scale(3.5); }
+}
+.snap-spark-ray {
+  animation: sparkRay 0.55s cubic-bezier(0.16,1,0.3,1) var(--ray-delay, 0s) both;
+}
+@keyframes sparkRay {
+  0%   { opacity: 0; transform: scaleX(0.05); }
+  12%  { opacity: 1; }
+  100% { opacity: 0; transform: scaleX(1.9);  }
+}
+.snap-spark-halo {
+  animation: sparkHalo 0.7s ease-out both;
+}
+@keyframes sparkHalo {
+  0%   { opacity: 0; transform: scale(0.2); }
+  20%  { opacity: 0.8; }
+  100% { opacity: 0; transform: scale(2.8); }
+}
+
+/* ── Energy expansion rings ── */
+.snap-energy-ring {
+  position: absolute; top: 50%; left: 50%;
+  width: 110px; height: 110px; border-radius: 50%; border: 2.5px solid;
+  transform: translate(-50%,-50%);
+  animation: ringExpand 0.85s cubic-bezier(0.15,0,0.55,1) both;
+  pointer-events: none; z-index: 25;
+}
+@keyframes ringExpand {
+  0%   { transform: translate(-50%,-50%) scale(0.04); opacity: 1; border-width: 4px; }
+  45%  { opacity: 0.65; }
+  100% { transform: translate(-50%,-50%) scale(7);    opacity: 0; border-width: 1px; }
+}
+
+/* ── Dust particles ── */
+.snap-dust {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  pointer-events: none; z-index: 15;
+  animation-name: dustFly;
+  animation-timing-function: cubic-bezier(0.12,0,0.82,1);
+  animation-fill-mode: both;
+}
+@keyframes dustFly {
+  0%   { transform: translate(-50%,-50%) scale(1.4) rotate(0deg); opacity: 1; }
+  12%  { opacity: 1; }
+  100% {
+    transform: translate(calc(-50% + var(--snap-tx)), calc(-50% + var(--snap-ty)))
+               scale(0) rotate(var(--snap-rot));
+    opacity: 0;
+  }
+}
+
+/* ── Text ── */
+.snap-text-block {
+  position: relative; z-index: 30;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 14px;
+  text-align: center; padding: 0 24px;
+}
+.snap-eyebrow {
+  font-family: 'Bebas Neue','Barlow Condensed',sans-serif;
+  font-size: 11px; letter-spacing: 0.5em;
+  color: rgba(245,158,11,0.55); text-transform: uppercase; margin-bottom: -6px;
+  opacity: 0;
+  animation: fadeIn 0.5s ease 2.4s both;
+}
+.snap-headline {
+  font-family: 'Bebas Neue','Barlow Condensed','Arial Black',sans-serif;
+  font-size: clamp(2.8rem, 7vw, 5.6rem);
+  letter-spacing: 0.07em; line-height: 1; color: #fff;
+  display: flex; flex-wrap: wrap; justify-content: center;
+  text-shadow: 0 0 60px rgba(251,191,36,0.18), 0 2px 20px rgba(0,0,0,1);
+}
+.snap-ch {
+  display: inline-block; opacity: 0;
+  animation: charReveal 0.42s cubic-bezier(0.16,1,0.3,1) both;
+}
+@keyframes charReveal {
+  0%   { opacity: 0; transform: translateY(24px) scale(0.78); filter: blur(12px); }
+  45%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0)   scale(1);    filter: blur(0);    }
+}
+.snap-caption {
+  font-size: 13px; line-height: 1.75;
+  color: rgba(255,255,255,0.22); letter-spacing: 0.05em;
+  opacity: 0;
+  animation: fadeIn 0.8s ease both; /* delay set inline from JSX */
+}
+
+/* ── Return button ── */
+.snap-return-btn {
+  position: relative; z-index: 30;
+  margin-top: 10px; padding: 11px 30px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.16em;
+  text-transform: uppercase; color: rgba(255,255,255,0.65);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer; transition: all 0.25s;
+  animation: fadeIn 0.6s ease both;
+}
+.snap-return-btn:hover {
+  background: rgba(245,158,11,0.1);
+  border-color: rgba(245,158,11,0.4);
+  color: #fcd34d;
+  box-shadow: 0 0 24px rgba(245,158,11,0.12);
+}
