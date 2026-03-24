@@ -79,6 +79,7 @@ export default function RoomPage() {
   const [room,         setRoom]         = useState(null);
   const [messages,     setMessages]     = useState([]);
   const [participants, setParticipants] = useState([]);
+  const [typingUsers,  setTypingUsers]  = useState([]);
   const [code,         setCode]         = useState("");
   const [isHost,       setIsHost]       = useState(false);
   const [identity,     setIdentity]     = useState(null);
@@ -114,6 +115,7 @@ export default function RoomPage() {
       setRoom(room);
       setParticipants(participants);
       setMessages(messages);
+      setTypingUsers([]);
       setCode(code || "");
       setIsHost(host || isRoomHost(roomId));
       if (room.problemLink) setProbLink(room.problemLink);
@@ -125,9 +127,24 @@ export default function RoomPage() {
         if (prev.find((m) => m.id === msg.id)) return prev; // deduplicate
         return [...prev, msg];
       });
+      if (msg.senderId) {
+        setTypingUsers((prev) => prev.filter((u) => u.guestId !== msg.senderId));
+      }
     };
 
     const onCodeUpdated = ({ code: newCode }) => setCode(newCode);
+
+    const onReactionUpdated = ({ messageId, reactions }) => {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions } : m)));
+    };
+
+    const onTypingUpdate = ({ guestId, displayName, isTyping }) => {
+      setTypingUsers((prev) => {
+        const filtered = prev.filter((u) => u.guestId !== guestId);
+        if (!isTyping) return filtered;
+        return [...filtered, { guestId, displayName }];
+      });
+    };
 
     const onParticipantsUpdate = (list) => setParticipants(list);
 
@@ -137,6 +154,7 @@ export default function RoomPage() {
         content: `${displayName} joined the room`, timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, sysMsg]);
+      setTypingUsers((prev) => prev.filter((u) => u.displayName !== displayName));
     };
 
     const onUserLeft = ({ displayName }) => {
@@ -145,6 +163,7 @@ export default function RoomPage() {
         content: `${displayName} left the room`, timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, sysMsg]);
+      setTypingUsers((prev) => prev.filter((u) => u.displayName !== displayName));
     };
 
     const onProblemShared = ({ link }) => setProbLink(link);
@@ -162,6 +181,8 @@ export default function RoomPage() {
     socket.on("room_joined",         onRoomJoined);
     socket.on("receive_message",     onReceiveMessage);
     socket.on("code_updated",        onCodeUpdated);
+    socket.on("reaction_updated",    onReactionUpdated);
+    socket.on("typing_update",       onTypingUpdate);
     socket.on("participants_update", onParticipantsUpdate);
     socket.on("user_joined",         onUserJoined);
     socket.on("user_left",           onUserLeft);
@@ -180,6 +201,8 @@ export default function RoomPage() {
       socket.off("room_joined",         onRoomJoined);
       socket.off("receive_message",     onReceiveMessage);
       socket.off("code_updated",        onCodeUpdated);
+      socket.off("reaction_updated",    onReactionUpdated);
+      socket.off("typing_update",       onTypingUpdate);
       socket.off("participants_update", onParticipantsUpdate);
       socket.off("user_joined",         onUserJoined);
       socket.off("user_left",           onUserLeft);
@@ -190,13 +213,40 @@ export default function RoomPage() {
   }, [identity, roomId]);
 
   /* ── Actions ─────────────────────────────────────────────────────────── */
-  const sendMessage = useCallback((content) => {
+  const sendMessage = useCallback((content, replyTo = null) => {
     if (!identity || !roomId) return;
     socketRef.current?.emit("send_message", {
       roomId,
       guestId:     identity.guestId,
       displayName: identity.displayName,
       content,
+      replyTo,
+    });
+    socketRef.current?.emit("typing_status", {
+      roomId,
+      guestId: identity.guestId,
+      displayName: identity.displayName,
+      isTyping: false,
+    });
+  }, [identity, roomId]);
+
+  const handleTypingStatus = useCallback((isTyping) => {
+    if (!identity || !roomId) return;
+    socketRef.current?.emit("typing_status", {
+      roomId,
+      guestId: identity.guestId,
+      displayName: identity.displayName,
+      isTyping,
+    });
+  }, [identity, roomId]);
+
+  const toggleReaction = useCallback((messageId, emoji) => {
+    if (!identity || !roomId || !messageId || !emoji) return;
+    socketRef.current?.emit("toggle_reaction", {
+      roomId,
+      messageId,
+      emoji,
+      guestId: identity.guestId,
     });
   }, [identity, roomId]);
 
@@ -461,6 +511,9 @@ export default function RoomPage() {
                 <ChatPanel
                   messages={messages}
                   onSendMessage={sendMessage}
+                  onTypingChange={handleTypingStatus}
+                  typingUsers={typingUsers}
+                  onToggleReaction={toggleReaction}
                   currentGuestId={identity?.guestId}
                 />
               </div>

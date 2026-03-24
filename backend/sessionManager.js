@@ -101,6 +101,39 @@ async function getMessages(roomId) {
   return data.map((d) => JSON.parse(d));
 }
 
+async function replaceMessages(roomId, messages) {
+  await redis.del(K.messages(roomId));
+  for (const m of messages) {
+    await redis.rPush(K.messages(roomId), JSON.stringify(m));
+  }
+}
+
+async function toggleMessageReaction(roomId, messageId, emoji, guestId) {
+  const messages = await getMessages(roomId);
+  const idx = messages.findIndex((m) => m.id === messageId);
+  if (idx === -1) return null;
+
+  const msg = { ...messages[idx] };
+  const reactions = { ...(msg.reactions || {}) };
+  const users = Array.isArray(reactions[emoji]) ? [...reactions[emoji]] : [];
+
+  const existingIdx = users.indexOf(guestId);
+  if (existingIdx >= 0) {
+    users.splice(existingIdx, 1);
+  } else {
+    users.push(guestId);
+  }
+
+  if (users.length > 0) reactions[emoji] = users;
+  else delete reactions[emoji];
+
+  msg.reactions = reactions;
+  messages[idx] = msg;
+  await replaceMessages(roomId, messages);
+
+  return { messageId: msg.id, reactions: msg.reactions };
+}
+
 // ─── Code ─────────────────────────────────────────────────────────────────────
 async function getCode(roomId) {
   return (await redis.get(K.code(roomId))) || "";
@@ -134,6 +167,7 @@ module.exports = {
   getParticipants,
   addMessage,
   getMessages,
+  toggleMessageReaction,
   getCode,
   setCode,
   setRoomTimer,

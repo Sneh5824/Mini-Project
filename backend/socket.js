@@ -72,21 +72,60 @@ module.exports = (io) => {
     });
 
     // ── send_message ─────────────────────────────────────────────────────────
-    socket.on("send_message", async ({ roomId, guestId, displayName, content }) => {
+    socket.on("send_message", async ({ roomId, guestId, displayName, content, replyTo = null }) => {
       try {
+        const trimmed = typeof content === "string" ? content.trim() : "";
+        if (!trimmed) return;
+
         const msg = {
           id:          uuidv4(),
           roomId,
           senderId:    guestId,
           senderName:  displayName,
-          content,
+          content:     trimmed,
           timestamp:   Date.now(),
           type:        "text",
+          replyTo:     null,
+          reactions:   {},
         };
+
+        // Optional inline reply context shown in chat bubbles
+        if (replyTo && typeof replyTo === "object") {
+          msg.replyTo = {
+            id: replyTo.id,
+            senderName: replyTo.senderName,
+            content: replyTo.content,
+            type: replyTo.type || "text",
+          };
+        }
+
         await sm.addMessage(roomId, msg);
         io.to(roomId).emit("receive_message", msg);
       } catch (err) {
         console.error("[Socket] send_message error:", err.message);
+      }
+    });
+
+    // ── typing_status ───────────────────────────────────────────────────────
+    socket.on("typing_status", ({ roomId, guestId, displayName, isTyping }) => {
+      if (!roomId || !guestId) return;
+      socket.to(roomId).emit("typing_update", {
+        guestId,
+        displayName,
+        isTyping: !!isTyping,
+        ts: Date.now(),
+      });
+    });
+
+    // ── toggle_reaction ─────────────────────────────────────────────────────
+    socket.on("toggle_reaction", async ({ roomId, messageId, emoji, guestId }) => {
+      try {
+        if (!roomId || !messageId || !emoji || !guestId) return;
+        const updated = await sm.toggleMessageReaction(roomId, messageId, emoji, guestId);
+        if (!updated) return;
+        io.to(roomId).emit("reaction_updated", updated);
+      } catch (err) {
+        console.error("[Socket] toggle_reaction error:", err.message);
       }
     });
 
@@ -142,6 +181,13 @@ module.exports = (io) => {
       if (!roomId || !guestId) return;
 
       try {
+        socket.to(roomId).emit("typing_update", {
+          guestId,
+          displayName,
+          isTyping: false,
+          ts: Date.now(),
+        });
+
         await sm.removeParticipant(roomId, guestId);
         const participants = await sm.getParticipants(roomId);
 
