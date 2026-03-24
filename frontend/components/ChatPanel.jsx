@@ -42,6 +42,19 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function pickAudioMimeType() {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((m) => MediaRecorder.isTypeSupported(m)) || "";
+}
+
 // ── Message Bubble ──────────────────────────────────────────────────────────
 function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }) {
   if (msg.type === "system") {
@@ -142,7 +155,12 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
                     {formatSize(attachment.size || 0)}
                   </span>
                 </div>
-                <audio controls src={attachment.dataUrl} className="w-full h-9" />
+                <audio controls preload="metadata" src={attachment.dataUrl} className="w-full h-9" />
+                {Number.isFinite(Number(attachment.durationSec)) && Number(attachment.durationSec) > 0 && (
+                  <p className="mt-1 text-[10px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+                    Duration: {formatDuration(Number(attachment.durationSec))}
+                  </p>
+                )}
               </div>
             ) : (
               <a
@@ -302,6 +320,7 @@ export default function ChatPanel({
   const recordChunksRef = useRef([]);
   const recordStreamRef = useRef(null);
   const recordTimerRef = useRef(null);
+  const recordSecRef = useRef(0);
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -413,10 +432,17 @@ export default function ChatPanel({
       setPendingAttachment(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       let recorder;
+      const preferredMime = pickAudioMimeType();
       try {
-        recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+        recorder = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream);
       } catch {
         recorder = new MediaRecorder(stream);
       }
@@ -424,6 +450,7 @@ export default function ChatPanel({
       mediaRecorderRef.current = recorder;
       recordChunksRef.current = [];
       setRecordSec(0);
+      recordSecRef.current = 0;
 
       recorder.ondataavailable = (ev) => {
         if (ev.data && ev.data.size > 0) {
@@ -441,13 +468,19 @@ export default function ChatPanel({
           }
 
           const dataUrl = await readFileAsDataUrl(blob);
+          const mimeType = blob.type || recorder.mimeType || "audio/webm";
+          const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
           setPendingAttachment({
-            fileName: `voice-note-${Date.now()}.webm`,
-            mimeType: blob.type || "audio/webm",
+            fileName: `voice-note-${Date.now()}.${ext}`,
+            mimeType,
             size: blob.size,
             dataUrl,
             kind: "audio",
+            durationSec: recordSecRef.current,
           });
+          if (recordSecRef.current <= 0) {
+            setAttachErr("Recorded too short. Hold record for at least 1 second.");
+          }
         } finally {
           if (recordStreamRef.current) {
             recordStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -458,7 +491,13 @@ export default function ChatPanel({
 
       recorder.start();
       setIsRecording(true);
-      recordTimerRef.current = setInterval(() => setRecordSec((s) => s + 1), 1000);
+      recordTimerRef.current = setInterval(() => {
+        setRecordSec((s) => {
+          const next = s + 1;
+          recordSecRef.current = next;
+          return next;
+        });
+      }, 1000);
     } catch (_err) {
       setAttachErr("Microphone permission denied or unavailable.");
     }

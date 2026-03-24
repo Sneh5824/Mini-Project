@@ -101,9 +101,11 @@ module.exports = (io) => {
             return;
           }
 
+          const lowerFile = fileName.toLowerCase();
+          const looksAudio = /\.(webm|ogg|wav|mp3|m4a|aac|flac)$/.test(lowerFile);
           const kind = mimeType.startsWith("image/")
             ? "image"
-            : mimeType.startsWith("audio/")
+            : (mimeType.startsWith("audio/") || looksAudio)
               ? "audio"
               : "file";
           safeAttachment = { dataUrl, fileName, mimeType, size, kind };
