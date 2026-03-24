@@ -94,7 +94,7 @@ const crypto = require("crypto");
 
 const EXEC_TIMEOUT = 10000; // 10 seconds
 
-function execCode(language, code) {
+function execCode(language, code, stdin = "") {
   const id     = crypto.randomBytes(8).toString("hex");
   const tmpDir = os.tmpdir();
   let stdout = "", stderr = "", exitCode = 0;
@@ -122,7 +122,7 @@ function execCode(language, code) {
     if (language === "javascript") {
       const f = tmp(".js");
       fs.writeFileSync(f, code);
-      const r = run("node", [f]);
+      const r = run("node", [f], { input: stdin });
       stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
       if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
 
@@ -130,22 +130,22 @@ function execCode(language, code) {
       const f = tmp(".py");
       fs.writeFileSync(f, code);
       // Try "python" first, then "python3"
-      let r = run("python", [f]);
-      if (r.exitCode === -1 && r.stderr.includes("not recognized")) r = run("python3", [f]);
+      let r = run("python", [f], { input: stdin });
+      if (r.exitCode === -1 && r.stderr.includes("not recognized")) r = run("python3", [f], { input: stdin });
       stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
       if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
 
     } else if (language === "typescript") {
       const f = tmp(".ts");
       fs.writeFileSync(f, code);
-      const r = run("npx", ["--yes", "ts-node", "--skipProject", f], { shell: true });
+      const r = run("npx", ["--yes", "ts-node", "--skipProject", f], { shell: true, input: stdin });
       stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
       if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
 
     } else if (language === "go") {
       const f = tmp(".go");
       fs.writeFileSync(f, code);
-      const r = run("go", ["run", f]);
+      const r = run("go", ["run", f], { input: stdin });
       stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
       if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
 
@@ -160,7 +160,7 @@ function execCode(language, code) {
       } else {
         const classFile = path.join(tmpDir, "Solution.class");
         tempFiles.push(classFile);
-        const r = run("java", ["-cp", tmpDir, "Solution"]);
+        const r = run("java", ["-cp", tmpDir, "Solution"], { input: stdin });
         stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
         if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
       }
@@ -173,7 +173,7 @@ function execCode(language, code) {
       if (compile.exitCode !== 0) {
         stdout = ""; stderr = compile.stderr; exitCode = compile.exitCode;
       } else {
-        const r = run(out, []);
+        const r = run(out, [], { input: stdin });
         stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
         if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
       }
@@ -186,7 +186,7 @@ function execCode(language, code) {
       if (compile.exitCode !== 0) {
         stdout = ""; stderr = compile.stderr; exitCode = compile.exitCode;
       } else {
-        const r = run(out, []);
+        const r = run(out, [], { input: stdin });
         stdout = r.stdout; stderr = r.stderr; exitCode = r.exitCode;
         if (r.timedOut) { stderr = "Execution timed out (10s)"; exitCode = -1; }
       }
@@ -203,11 +203,11 @@ function execCode(language, code) {
 }
 
 app.post("/api/run", (req, res) => {
-  const { language, code } = req.body;
+  const { language, code, stdin = "" } = req.body;
   if (!language || !code) return res.status(400).json({ error: "Missing language or code." });
   try {
     const start  = Date.now();
-    const result = execCode(language, code);
+    const result = execCode(language, code, String(stdin));
     result.time  = `${Date.now() - start}ms`;
     res.json({ run: result });
   } catch (err) {

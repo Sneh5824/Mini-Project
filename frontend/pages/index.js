@@ -7,6 +7,33 @@ const BACKEND  = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
 
 const TIMEOUTS = [10, 20, 30, 60];
 
+const ROOM_TEMPLATES = [
+  {
+    id: "dsa",
+    title: "DSA Practice",
+    desc: "Coding room with enough time for problem solving",
+    roomType: "coding",
+    timeout: 60,
+    roomName: "DSA Practice Session",
+  },
+  {
+    id: "interview",
+    title: "Interview Mock",
+    desc: "Timed coding interview simulation",
+    roomType: "coding",
+    timeout: 30,
+    roomName: "Interview Mock Round",
+  },
+  {
+    id: "debug",
+    title: "Debug Session",
+    desc: "Quick collaborative bug triage",
+    roomType: "chat",
+    timeout: 20,
+    roomName: "Live Debug Session",
+  },
+];
+
 const POSTER_LINES = [
   { text: "TIMED.",      cls: "text-white",         delay: 0.10 },
   { text: "ANONYMOUS.",  cls: "text-white/70",      delay: 0.38 },
@@ -30,12 +57,20 @@ export default function Home() {
   const [joining,  setJoining]  = useState(false);
   const [joinErr,  setJoinErr]  = useState("");
   const [tab,      setTab]      = useState("create");
+  const [activeTemplate, setActiveTemplate] = useState("");
 
   useEffect(() => {
     setIdentity(getOrCreateIdentity());
   }, []);
 
   /* ── Create room ───────────────────────────────────────────────────────── */
+  const applyTemplate = (template) => {
+    setActiveTemplate(template.id);
+    setRoomType(template.roomType);
+    setTimeoutVal(template.timeout);
+    setRoomName(template.roomName);
+  };
+
   const handleCreate = async () => {
     if (!identity || creating) return;
     setCreating(true);
@@ -179,6 +214,24 @@ export default function Home() {
 
             {tab === "create" && (
               <>
+                <Field label="Templates" hint="optional">
+                  <div className="grid grid-cols-1 gap-2">
+                    {ROOM_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        onClick={() => applyTemplate(tpl)}
+                        className="text-left px-3 py-2 rounded-lg transition-colors"
+                        style={activeTemplate === tpl.id
+                          ? { background: "rgba(220,38,38,0.12)", border: "1px solid rgba(220,38,38,0.35)" }
+                          : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }
+                        }
+                      >
+                        <p className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.82)" }}>{tpl.title}</p>
+                        <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.34)" }}>{tpl.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </Field>
                 <Field label="Room Name" hint="optional">
                   <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value.slice(0, 40))} placeholder="e.g. Weekly DSA Grind, Bug Hunt 3am…" className="blip-input" maxLength={40} />
                   {roomName && <p className="text-right text-[11px] mt-1" style={{ color: "rgba(255,255,255,0.18)" }}>{roomName.trim().length}/40</p>}

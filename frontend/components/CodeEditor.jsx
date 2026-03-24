@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 
 // Monaco must be loaded client-side only
@@ -6,40 +6,38 @@ const Monaco = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 const LANGUAGES = [
   { value: "javascript", label: "JavaScript" },
-  { value: "python",     label: "Python" },
-  { value: "java",       label: "Java" },
-  { value: "cpp",        label: "C++" },
+  { value: "python", label: "Python" },
+  { value: "java", label: "Java" },
+  { value: "cpp", label: "C++" },
   { value: "typescript", label: "TypeScript" },
-  { value: "go",         label: "Go" },
-  { value: "rust",       label: "Rust" },
+  { value: "go", label: "Go" },
+  { value: "rust", label: "Rust" },
 ];
 
-// Maps our language values to Piston language ids
 const PISTON_LANG = {
   javascript: "javascript",
-  python:     "python",
-  java:       "java",
-  cpp:        "c++",
+  python: "python",
+  java: "java",
+  cpp: "c++",
   typescript: "typescript",
-  go:         "go",
-  rust:       "rust",
+  go: "go",
+  rust: "rust",
 };
 
 const PLACEHOLDERS = {
   javascript: '// Start coding...\n\nfunction solution() {\n  console.log("Hello, World!");\n}\n\nsolution();',
-  python:     '# Start coding...\n\ndef solution():\n    print("Hello, World!")\n\nsolution()',
-  java:       '// Start coding...\n\npublic class Solution {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
-  cpp:        '// Start coding...\n\n#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}',
+  python: '# Start coding...\n\ndef solution():\n    print("Hello, World!")\n\nsolution()',
+  java: '// Start coding...\n\npublic class Solution {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
+  cpp: '// Start coding...\n\n#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}',
   typescript: '// Start coding...\n\nfunction solution(): void {\n  console.log("Hello, World!");\n}\n\nsolution();',
-  go:         '// Start coding...\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, World!")\n}',
-  rust:       '// Start coding...\n\nfn main() {\n    println!("Hello, World!");\n}',
+  go: '// Start coding...\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, World!")\n}',
+  rust: '// Start coding...\n\nfn main() {\n    println!("Hello, World!");\n}',
 };
 
 const MIN_OUTPUT_H = 80;
 const MAX_OUTPUT_H = 500;
 const DEFAULT_OUTPUT_H = 200;
 
-// Debounce helper
 function useDebounce(fn, delay) {
   const timer = useRef(null);
   return useCallback((...args) => {
@@ -48,7 +46,6 @@ function useDebounce(fn, delay) {
   }, [fn, delay]);
 }
 
-// Drag-to-resize for output panel height
 function useOutputResize(initial) {
   const [height, setHeight] = useState(initial);
   const onMouseDown = useCallback((e) => {
@@ -57,7 +54,7 @@ function useOutputResize(initial) {
     const startH = height;
     document.body.classList.add("resizing-row");
     const onMove = (ev) => {
-      const delta = startY - ev.clientY; // drag up = bigger
+      const delta = startY - ev.clientY;
       setHeight(Math.min(MAX_OUTPUT_H, Math.max(MIN_OUTPUT_H, startH + delta)));
     };
     const onUp = () => {
@@ -71,54 +68,258 @@ function useOutputResize(initial) {
   return [height, onMouseDown];
 }
 
-export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
-  const [lang, setLang]           = useState("javascript");
-  const [running, setRunning]     = useState(false);
-  const [output, setOutput]       = useState(null);   // { stdout, stderr, exitCode, time }
+function sanitizeCursorShape(cursorData) {
+  if (!cursorData) return null;
+  const safeNum = (n, fallback = 1) => {
+    const x = Number(n);
+    return Number.isFinite(x) ? Math.max(1, Math.floor(x)) : fallback;
+  };
+
+  const position = cursorData.position
+    ? {
+        lineNumber: safeNum(cursorData.position.lineNumber),
+        column: safeNum(cursorData.position.column),
+      }
+    : null;
+
+  const selection = cursorData.selection
+    ? {
+        startLineNumber: safeNum(cursorData.selection.startLineNumber),
+        startColumn: safeNum(cursorData.selection.startColumn),
+        endLineNumber: safeNum(cursorData.selection.endLineNumber),
+        endColumn: safeNum(cursorData.selection.endColumn),
+      }
+    : null;
+
+  return { position, selection };
+}
+
+export default function CodeEditor({
+  code,
+  onCodeChange,
+  readOnly = false,
+  currentGuestId,
+  remoteCursors = {},
+  onCursorActivity = () => {},
+}) {
+  const [lang, setLang] = useState("javascript");
+  const [running, setRunning] = useState(false);
+  const [runningTests, setRunningTests] = useState(false);
+  const [output, setOutput] = useState(null);
   const [showOutput, setShowOutput] = useState(false);
-  const [outputH, onOutputDrag]   = useOutputResize(DEFAULT_OUTPUT_H);
+  const [showTests, setShowTests] = useState(true);
+  const [outputH, onOutputDrag] = useOutputResize(DEFAULT_OUTPUT_H);
+  const [runInput, setRunInput] = useState("");
+  const [testCases, setTestCases] = useState([
+    { id: 1, input: "", expected: "" },
+    { id: 2, input: "", expected: "" },
+  ]);
+  const [testResults, setTestResults] = useState({});
+
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const decorationIdsRef = useRef([]);
+  const editorDisposablesRef = useRef([]);
+  const nextTestIdRef = useRef(3);
 
   const displayCode = code || PLACEHOLDERS[lang];
   const isFirstRender = useRef(true);
-
   const emitChange = useDebounce(onCodeChange, 300);
+  const emitCursor = useDebounce((payload) => onCursorActivity(payload), 80);
+
+  useEffect(() => {
+    return () => {
+      editorDisposablesRef.current.forEach((d) => d?.dispose?.());
+      editorDisposablesRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const next = [];
+
+    for (const cursor of Object.values(remoteCursors || {})) {
+      if (!cursor || cursor.guestId === currentGuestId) continue;
+
+      const clean = sanitizeCursorShape(cursor);
+      if (!clean) continue;
+
+      if (clean.selection) {
+        const { startLineNumber, startColumn, endLineNumber, endColumn } = clean.selection;
+        const hasRange = startLineNumber !== endLineNumber || startColumn !== endColumn;
+        if (hasRange) {
+          next.push({
+            range: new monaco.Range(startLineNumber, startColumn, endLineNumber, endColumn),
+            options: {
+              className: "blip-remote-selection",
+              hoverMessage: { value: `${cursor.displayName || "Participant"} selection` },
+            },
+          });
+        }
+      }
+
+      if (clean.position) {
+        const { lineNumber, column } = clean.position;
+        next.push({
+          range: new monaco.Range(lineNumber, column, lineNumber, column + 1),
+          options: {
+            className: "blip-remote-cursor",
+            hoverMessage: { value: `${cursor.displayName || "Participant"} cursor` },
+          },
+        });
+      }
+    }
+
+    decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, next);
+  }, [remoteCursors, currentGuestId]);
+
+  const publishLocalCursor = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const pos = editor.getPosition();
+    const sel = editor.getSelection();
+    emitCursor({
+      position: pos
+        ? {
+            lineNumber: pos.lineNumber,
+            column: pos.column,
+          }
+        : null,
+      selection: sel
+        ? {
+            startLineNumber: sel.startLineNumber,
+            startColumn: sel.startColumn,
+            endLineNumber: sel.endLineNumber,
+            endColumn: sel.endColumn,
+          }
+        : null,
+    });
+  }, [emitCursor]);
+
+  const onEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    editorDisposablesRef.current.forEach((d) => d?.dispose?.());
+    editorDisposablesRef.current = [];
+
+    editorDisposablesRef.current.push(editor.onDidChangeCursorPosition(publishLocalCursor));
+    editorDisposablesRef.current.push(editor.onDidChangeCursorSelection(publishLocalCursor));
+
+    publishLocalCursor();
+  };
 
   const handleEditorChange = (value) => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     emitChange(value || "");
   };
 
   const handleLangChange = (newLang) => {
     setLang(newLang);
     setOutput(null);
+    setTestResults({});
     if (!code) onCodeChange(PLACEHOLDERS[newLang]);
+  };
+
+  const executeCode = async (stdin = "") => {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+    const res = await fetch(`${backendUrl}/api/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        language: PISTON_LANG[lang],
+        code: displayCode,
+        stdin,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+    const run = data.run || {};
+    return {
+      stdout: run.stdout || "",
+      stderr: run.stderr || "",
+      exitCode: run.exitCode ?? 0,
+      time: run.time || null,
+    };
   };
 
   const runCode = async () => {
     setRunning(true);
     setShowOutput(true);
     setOutput(null);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+
     try {
-      const res = await fetch(`${backendUrl}/api/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language: PISTON_LANG[lang], code: displayCode }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-      const run = data.run || {};
-      setOutput({
-        stdout:   run.stdout   || "",
-        stderr:   run.stderr   || "",
-        exitCode: run.exitCode ?? 0,
-        time:     run.time     || null,
-      });
+      const run = await executeCode(runInput);
+      setOutput(run);
     } catch (err) {
       setOutput({ stdout: "", stderr: err.message, exitCode: -1, time: null });
     } finally {
       setRunning(false);
     }
+  };
+
+  const runAllTests = async () => {
+    setRunningTests(true);
+    setTestResults({});
+
+    try {
+      for (const testCase of testCases) {
+        try {
+          const run = await executeCode(testCase.input || "");
+          const actual = (run.stdout || "").trim();
+          const expected = (testCase.expected || "").trim();
+          const pass = run.exitCode === 0 && !run.stderr && (expected === "" || actual === expected);
+
+          setTestResults((prev) => ({
+            ...prev,
+            [testCase.id]: {
+              ...run,
+              pass,
+              actual,
+            },
+          }));
+        } catch (err) {
+          setTestResults((prev) => ({
+            ...prev,
+            [testCase.id]: {
+              stdout: "",
+              stderr: err.message,
+              exitCode: -1,
+              time: null,
+              pass: false,
+              actual: "",
+            },
+          }));
+        }
+      }
+    } finally {
+      setRunningTests(false);
+    }
+  };
+
+  const addTestCase = () => {
+    setTestCases((prev) => [...prev, { id: nextTestIdRef.current++, input: "", expected: "" }]);
+  };
+
+  const removeTestCase = (id) => {
+    setTestCases((prev) => prev.filter((t) => t.id !== id));
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const updateTestCase = (id, patch) => {
+    setTestCases((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   };
 
   const hasError = output && (output.exitCode !== 0 || output.stderr);
@@ -128,13 +329,13 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#07070e" }}>
-      {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 flex-shrink-0" style={{ background: "#0a0a14", borderBottom: "1px solid rgba(255,255,255,0.055)" }}>
         <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "rgba(255,255,255,0.22)" }}>
           <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
         </svg>
         <span className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.22)" }}>Editor</span>
         <div className="flex-1" />
+
         <select
           value={lang}
           onChange={(e) => handleLangChange(e.target.value)}
@@ -146,18 +347,22 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
           ))}
         </select>
 
-        {/* Run button */}
+        <button
+          onClick={() => setShowTests((v) => !v)}
+          className="text-xs px-2 py-1 rounded border transition-colors"
+          style={{ borderColor: "rgba(255,255,255,0.11)", color: "rgba(255,255,255,0.58)", background: showTests ? "rgba(220,38,38,0.12)" : "transparent" }}
+          title="Toggle test cases panel"
+        >
+          {showTests ? "Hide Tests" : "Show Tests"}
+        </button>
+
         <button
           onClick={runCode}
-          disabled={running || readOnly}
+          disabled={running || runningTests || readOnly}
           title={readOnly ? "Only host can run code" : "Run code (Ctrl+Enter)"}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold transition-all
-            ${readOnly
-              ? "cursor-not-allowed opacity-30"
-              : running
-                ? "cursor-wait"
-                : "cursor-pointer"
-            }`}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold transition-all ${
+            readOnly ? "cursor-not-allowed opacity-30" : running ? "cursor-wait" : "cursor-pointer"
+          }`}
           style={readOnly
             ? { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.25)" }
             : running
@@ -182,15 +387,12 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
           )}
         </button>
 
-        {/* Toggle output panel */}
         {output !== null && (
           <button
             onClick={() => setShowOutput((v) => !v)}
-            className={`text-xs px-2 py-1 rounded border transition-colors
-              ${hasError
-                ? "border-red-800 text-red-400 hover:bg-red-950/30"
-                : "border-green-800 text-green-400 hover:bg-green-950/30"
-              }`}
+            className={`text-xs px-2 py-1 rounded border transition-colors ${
+              hasError ? "border-red-800 text-red-400 hover:bg-red-950/30" : "border-green-800 text-green-400 hover:bg-green-950/30"
+            }`}
           >
             {showOutput ? "Hide Output" : "Show Output"}
             {output.exitCode !== 0 && " (error)"}
@@ -198,7 +400,92 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
         )}
       </div>
 
-      {/* Monaco — flex-1 takes remaining space */}
+      {showTests && (
+        <div className="px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.055)", background: "#0a0a14" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.22)" }}>Test Cases</span>
+            <div className="flex-1" />
+            <button
+              onClick={addTestCase}
+              className="text-xs px-2 py-1 rounded"
+              style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.65)" }}
+            >
+              + Add
+            </button>
+            <button
+              onClick={runAllTests}
+              disabled={running || runningTests || readOnly || testCases.length === 0}
+              className="text-xs px-2 py-1 rounded"
+              style={{ background: "rgba(220,38,38,0.16)", color: "#fca5a5", opacity: (running || runningTests || readOnly || testCases.length === 0) ? 0.45 : 1 }}
+            >
+              {runningTests ? "Running Tests..." : "Run Tests"}
+            </button>
+          </div>
+
+          <div className="mb-2">
+            <label className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.24)" }}>Custom Input For Run</label>
+            <textarea
+              value={runInput}
+              onChange={(e) => setRunInput(e.target.value)}
+              className="w-full mt-1 px-2 py-1.5 rounded text-xs"
+              rows={2}
+              placeholder="stdin for Run button (optional)"
+              style={{ background: "#131320", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.72)" }}
+            />
+          </div>
+
+          <div className="max-h-[210px] overflow-auto space-y-2 pr-1">
+            {testCases.map((tc, idx) => {
+              const result = testResults[tc.id];
+              return (
+                <div key={tc.id} className="p-2 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-semibold" style={{ color: "rgba(255,255,255,0.62)" }}>Test {idx + 1}</span>
+                    <div className="flex-1" />
+                    {result && (
+                      <span className="text-[10px]" style={{ color: result.pass ? "#4ade80" : "#f87171" }}>
+                        {result.pass ? "PASS" : "FAIL"}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => removeTestCase(tc.id)}
+                      className="text-[10px] px-1.5 py-0.5 rounded"
+                      style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.04)" }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <textarea
+                      value={tc.input}
+                      onChange={(e) => updateTestCase(tc.id, { input: e.target.value })}
+                      rows={2}
+                      placeholder="Input"
+                      className="px-2 py-1.5 rounded text-xs"
+                      style={{ background: "#131320", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.72)" }}
+                    />
+                    <textarea
+                      value={tc.expected}
+                      onChange={(e) => updateTestCase(tc.id, { expected: e.target.value })}
+                      rows={2}
+                      placeholder="Expected output"
+                      className="px-2 py-1.5 rounded text-xs"
+                      style={{ background: "#131320", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.72)" }}
+                    />
+                  </div>
+                  {result && (
+                    <p className="mt-1 text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      Actual: {result.actual || "(empty)"}
+                      {result.stderr ? ` | Error: ${result.stderr}` : ""}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden monaco-wrapper min-h-0">
         <Monaco
           height="100%"
@@ -206,13 +493,14 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
           theme="vs-dark"
           value={displayCode}
           onChange={handleEditorChange}
+          onMount={onEditorMount}
           options={{
-            minimap:        { enabled: false },
-            fontSize:       14,
-            fontFamily:     "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-            fontLigatures:  true,
-            wordWrap:       "on",
-            lineNumbers:    "on",
+            minimap: { enabled: false },
+            fontSize: 14,
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+            fontLigatures: true,
+            wordWrap: "on",
+            lineNumbers: "on",
             renderLineHighlight: "line",
             scrollBeyondLastLine: false,
             smoothScrolling: true,
@@ -224,10 +512,8 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
         />
       </div>
 
-      {/* Output panel */}
       {showOutput && (
         <>
-          {/* Drag handle */}
           <div
             onMouseDown={onOutputDrag}
             className="flex-shrink-0 h-2 flex items-center justify-center group cursor-row-resize transition-colors"
@@ -236,26 +522,22 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
             onMouseLeave={(e) => { e.currentTarget.style.background = "#0a0a14"; }}
           >
             <div className="flex gap-0.5">
-              {[0,1,2].map((i) => (
+              {[0, 1, 2].map((i) => (
                 <div key={i} className="w-4 h-0.5 rounded-full transition-colors" style={{ background: "rgba(255,255,255,0.12)" }} />
               ))}
             </div>
           </div>
 
-          {/* Output content */}
           <div
             className="flex-shrink-0 flex flex-col overflow-hidden"
             style={{ height: outputH, background: "#07070e", borderTop: "1px solid rgba(255,255,255,0.05)" }}
           >
-            {/* Output header */}
             <div className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
               <div className={`w-2 h-2 rounded-full flex-shrink-0 ${hasError ? "bg-red-500" : "bg-green-500"}`} />
               <span className={`text-xs font-semibold ${hasError ? "text-red-400" : "text-green-400"}`}>
                 {running ? "Running..." : hasError ? `Error (exit ${output.exitCode})` : "Success"}
               </span>
-              {output?.time && (
-                <span className="text-xs text-gray-600 ml-auto">{output.time}</span>
-              )}
+              {output?.time && <span className="text-xs text-gray-600 ml-auto">{output.time}</span>}
               <button
                 onClick={() => { setShowOutput(false); setOutput(null); }}
                 className="ml-auto text-xs transition-colors"
@@ -267,7 +549,6 @@ export default function CodeEditor({ code, onCodeChange, readOnly = false }) {
               </button>
             </div>
 
-            {/* Output text */}
             <pre className="flex-1 overflow-auto px-4 py-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words" style={{ color: "rgba(255,255,255,0.7)" }}>
               {running ? (
                 <span className="text-gray-500 italic">Executing...</span>

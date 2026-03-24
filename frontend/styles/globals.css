@@ -101,6 +101,16 @@ pre,
   background-color: #0d0d18 !important;
 }
 
+.monaco-editor .blip-remote-cursor {
+  border-left: 2px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.monaco-editor .blip-remote-selection {
+  background: rgba(220, 38, 38, 0.2);
+  border-radius: 2px;
+}
+
 /* ── Message animations ───────────────────────────────────────────────────── */
 .msg-enter {
   animation: slideUp 0.2s ease forwards;

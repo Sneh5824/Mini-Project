@@ -140,6 +140,18 @@ module.exports = (io) => {
       }
     });
 
+    // ── cursor_update ───────────────────────────────────────────────────────
+    socket.on("cursor_update", ({ roomId, guestId, displayName, position, selection }) => {
+      if (!roomId || !guestId) return;
+      socket.to(roomId).emit("cursor_updated", {
+        guestId,
+        displayName,
+        position,
+        selection,
+        ts: Date.now(),
+      });
+    });
+
     // ── share_problem ────────────────────────────────────────────────────────
     socket.on("share_problem", async ({ roomId, guestId, displayName, link }) => {
       try {
@@ -185,6 +197,12 @@ module.exports = (io) => {
           guestId,
           displayName,
           isTyping: false,
+          ts: Date.now(),
+        });
+
+        socket.to(roomId).emit("cursor_removed", {
+          guestId,
+          displayName,
           ts: Date.now(),
         });
 

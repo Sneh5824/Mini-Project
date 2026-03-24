@@ -80,6 +80,7 @@ export default function RoomPage() {
   const [messages,     setMessages]     = useState([]);
   const [participants, setParticipants] = useState([]);
   const [typingUsers,  setTypingUsers]  = useState([]);
+  const [remoteCursors, setRemoteCursors] = useState({});
   const [code,         setCode]         = useState("");
   const [isHost,       setIsHost]       = useState(false);
   const [identity,     setIdentity]     = useState(null);
@@ -116,6 +117,7 @@ export default function RoomPage() {
       setParticipants(participants);
       setMessages(messages);
       setTypingUsers([]);
+      setRemoteCursors({});
       setCode(code || "");
       setIsHost(host || isRoomHost(roomId));
       if (room.problemLink) setProbLink(room.problemLink);
@@ -134,6 +136,24 @@ export default function RoomPage() {
 
     const onCodeUpdated = ({ code: newCode }) => setCode(newCode);
 
+    const onCursorUpdated = ({ guestId, displayName, position, selection }) => {
+      if (!guestId || guestId === identity?.guestId) return;
+      setRemoteCursors((prev) => ({
+        ...prev,
+        [guestId]: { guestId, displayName, position, selection },
+      }));
+    };
+
+    const onCursorRemoved = ({ guestId }) => {
+      if (!guestId) return;
+      setRemoteCursors((prev) => {
+        if (!prev[guestId]) return prev;
+        const next = { ...prev };
+        delete next[guestId];
+        return next;
+      });
+    };
+
     const onReactionUpdated = ({ messageId, reactions }) => {
       setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions } : m)));
     };
@@ -146,7 +166,17 @@ export default function RoomPage() {
       });
     };
 
-    const onParticipantsUpdate = (list) => setParticipants(list);
+    const onParticipantsUpdate = (list) => {
+      setParticipants(list);
+      const active = new Set(list.map((p) => p.guestId));
+      setRemoteCursors((prev) => {
+        const next = {};
+        for (const [guestId, data] of Object.entries(prev)) {
+          if (active.has(guestId)) next[guestId] = data;
+        }
+        return next;
+      });
+    };
 
     const onUserJoined = ({ displayName }) => {
       const sysMsg = {
@@ -157,13 +187,21 @@ export default function RoomPage() {
       setTypingUsers((prev) => prev.filter((u) => u.displayName !== displayName));
     };
 
-    const onUserLeft = ({ displayName }) => {
+    const onUserLeft = ({ guestId, displayName }) => {
       const sysMsg = {
         id: `sys-${Date.now()}`, type: "system",
         content: `${displayName} left the room`, timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, sysMsg]);
-      setTypingUsers((prev) => prev.filter((u) => u.displayName !== displayName));
+      if (guestId) {
+        setTypingUsers((prev) => prev.filter((u) => u.guestId !== guestId));
+        setRemoteCursors((prev) => {
+          if (!prev[guestId]) return prev;
+          const next = { ...prev };
+          delete next[guestId];
+          return next;
+        });
+      }
     };
 
     const onProblemShared = ({ link }) => setProbLink(link);
@@ -181,6 +219,8 @@ export default function RoomPage() {
     socket.on("room_joined",         onRoomJoined);
     socket.on("receive_message",     onReceiveMessage);
     socket.on("code_updated",        onCodeUpdated);
+    socket.on("cursor_updated",      onCursorUpdated);
+    socket.on("cursor_removed",      onCursorRemoved);
     socket.on("reaction_updated",    onReactionUpdated);
     socket.on("typing_update",       onTypingUpdate);
     socket.on("participants_update", onParticipantsUpdate);
@@ -201,6 +241,8 @@ export default function RoomPage() {
       socket.off("room_joined",         onRoomJoined);
       socket.off("receive_message",     onReceiveMessage);
       socket.off("code_updated",        onCodeUpdated);
+      socket.off("cursor_updated",      onCursorUpdated);
+      socket.off("cursor_removed",      onCursorRemoved);
       socket.off("reaction_updated",    onReactionUpdated);
       socket.off("typing_update",       onTypingUpdate);
       socket.off("participants_update", onParticipantsUpdate);
@@ -254,6 +296,17 @@ export default function RoomPage() {
     setCode(newCode);
     socketRef.current?.emit("code_update", { roomId, code: newCode });
   }, [roomId]);
+
+  const emitCursorActivity = useCallback((cursorData) => {
+    if (!identity || !roomId || !cursorData) return;
+    socketRef.current?.emit("cursor_update", {
+      roomId,
+      guestId: identity.guestId,
+      displayName: identity.displayName,
+      position: cursorData.position,
+      selection: cursorData.selection,
+    });
+  }, [identity, roomId]);
 
   const shareProblem = () => {
     const link = probInput.trim();
@@ -528,6 +581,10 @@ export default function RoomPage() {
                 <CodeEditor
                   code={code}
                   onCodeChange={updateCode}
+                  currentGuestId={identity?.guestId}
+                  participants={participants}
+                  remoteCursors={remoteCursors}
+                  onCursorActivity={emitCursorActivity}
                 />
               </div>
             )}
