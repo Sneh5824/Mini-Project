@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 
 const QUICK_REACTIONS = ["👍", "🔥", "😂", "👏", "💡"];
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+
+function formatSize(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -16,6 +24,15 @@ function linkify(text) {
       </a>
     ) : part
   );
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── Message Bubble ──────────────────────────────────────────────────────────
@@ -45,6 +62,90 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
           >
             {msg.content}
           </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (msg.type === "attachment") {
+    const attachment = msg.attachment || {};
+    const isImage = attachment.kind === "image";
+    return (
+      <div className={`flex items-end gap-2 mb-2 msg-enter ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
+        {!isOwn && (
+          <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 mb-0.5" style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
+            {msg.senderName?.[0] ?? "?"}
+          </div>
+        )}
+
+        <div className={`flex flex-col ${isOwn ? "items-end" : "items-start"} max-w-[82%]`}>
+          <div
+            className={`px-3.5 py-2 rounded-2xl ${isOwn ? "rounded-br-sm" : "rounded-bl-sm"}`}
+            style={isOwn
+              ? { background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff" }
+              : { background: "#0e0e1c", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.85)" }
+            }
+          >
+            {msg.replyTo && (
+              <div
+                className="mb-2 px-2 py-1 rounded-lg"
+                style={{ borderLeft: "2px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.18)" }}
+              >
+                <p className="text-[10px] font-semibold" style={{ color: "rgba(255,255,255,0.72)" }}>
+                  Replying to {msg.replyTo.senderName}
+                </p>
+                <p className="text-[11px] truncate" style={{ color: "rgba(255,255,255,0.62)" }}>
+                  {msg.replyTo.content}
+                </p>
+              </div>
+            )}
+
+            {isImage ? (
+              <a href={attachment.dataUrl} target="_blank" rel="noreferrer" title="Open image">
+                <img
+                  src={attachment.dataUrl}
+                  alt={attachment.fileName || "image"}
+                  className="rounded-lg max-h-[240px] object-contain"
+                  style={{ border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.2)" }}
+                />
+              </a>
+            ) : (
+              <a
+                href={attachment.dataUrl}
+                download={attachment.fileName || "attachment"}
+                className="flex items-center gap-2 rounded-lg px-2.5 py-2 transition-colors"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)" }}
+                title="Download attachment"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M9 2a1 1 0 012 0v8.59l2.3-2.3a1 1 0 111.4 1.42l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 011.4-1.42L9 10.6V2z" />
+                  <path d="M3 14a1 1 0 011 1v1h12v-1a1 1 0 112 0v2a1 1 0 01-1 1H3a1 1 0 01-1-1v-2a1 1 0 011-1z" />
+                </svg>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold truncate">{attachment.fileName || "attachment"}</p>
+                  <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.65)" }}>{formatSize(attachment.size || 0)}</p>
+                </div>
+              </a>
+            )}
+
+            {msg.content ? (
+              <p className="text-sm leading-relaxed mt-2">{linkify(msg.content)}</p>
+            ) : null}
+          </div>
+
+          <div className={`flex items-center gap-1.5 mt-0.5 mx-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
+            <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.18)" }}>{formatTime(msg.timestamp)}</span>
+            <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.28)" }}>·</span>
+            <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.28)" }}>{msg.senderName}</span>
+            <button
+              onClick={() => onReply(msg)}
+              className="text-[10px] px-1.5 py-0.5 rounded-md"
+              style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.03)" }}
+              title="Reply"
+            >
+              Reply
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -154,9 +255,12 @@ export default function ChatPanel({
 }) {
   const [text, setText] = useState("");
   const [replyTarget, setReplyTarget] = useState(null);
+  const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [attachErr, setAttachErr] = useState("");
   const bottomRef = useRef(null);
   const typingRef = useRef(false);
   const idleTimerRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -191,7 +295,7 @@ export default function ChatPanel({
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !pendingAttachment) return;
     const replyTo = replyTarget
       ? {
           id: replyTarget.id,
@@ -200,15 +304,54 @@ export default function ChatPanel({
           type: replyTarget.type,
         }
       : null;
-    onSendMessage(trimmed, replyTo);
+
+    if (pendingAttachment) {
+      onSendMessage({
+        type: "attachment",
+        content: trimmed,
+        attachment: pendingAttachment,
+      }, replyTo);
+    } else {
+      onSendMessage(trimmed, replyTo);
+    }
+
     setText("");
     setReplyTarget(null);
+    setPendingAttachment(null);
+    setAttachErr("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     setTyping(false);
   };
 
   const handleKey = (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  const handlePickAttachment = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachErr("File too large. Max 3MB.");
+      setPendingAttachment(null);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setPendingAttachment({
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl,
+        kind: file.type.startsWith("image/") ? "image" : "file",
+      });
+      setAttachErr("");
+    } catch (err) {
+      setAttachErr(err.message || "Unable to read selected file.");
+      setPendingAttachment(null);
+    }
   };
 
   return (
@@ -266,6 +409,37 @@ export default function ChatPanel({
             </div>
           )}
 
+          {pendingAttachment && (
+            <div
+              className="px-3 py-2 rounded-lg text-xs flex items-start justify-between gap-3"
+              style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.28)" }}
+            >
+              <div className="min-w-0">
+                <p className="font-semibold" style={{ color: "#93c5fd" }}>
+                  {pendingAttachment.kind === "image" ? "Image ready" : "File ready"}
+                </p>
+                <p className="truncate" style={{ color: "rgba(255,255,255,0.72)" }}>
+                  {pendingAttachment.fileName} ({formatSize(pendingAttachment.size)})
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setPendingAttachment(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="text-xs"
+                style={{ color: "rgba(255,255,255,0.45)" }}
+                title="Remove attachment"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          {attachErr && (
+            <p className="text-[11px]" style={{ color: "#fca5a5" }}>{attachErr}</p>
+          )}
+
         <textarea
           className="flex-1 blip-input resize-none min-h-[40px] max-h-[120px] py-2 leading-snug"
           rows={1}
@@ -275,9 +449,29 @@ export default function ChatPanel({
           onKeyDown={handleKey}
         />
         </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handlePickAttachment}
+          className="hidden"
+          accept="image/*,.pdf,.txt,.md,.json,.csv,.zip,.rar,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+        />
+
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="px-2.5 py-2.5 rounded-lg flex-shrink-0 self-end transition-all"
+          style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.72)" }}
+          title="Attach file/image"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M8.6 13.4a3 3 0 004.24 0l3.18-3.18a3 3 0 00-4.24-4.24l-3.53 3.54a1 1 0 101.41 1.41l3.54-3.53a1 1 0 111.41 1.41l-3.18 3.18a1 1 0 01-1.41 0L6.48 8.48a3 3 0 114.24-4.24l.35.35a1 1 0 101.41-1.41l-.35-.35A5 5 0 105.07 9.9l3.53 3.5z" />
+          </svg>
+        </button>
+
         <button
           onClick={handleSend}
-          disabled={!text.trim()}
+          disabled={!text.trim() && !pendingAttachment}
           className="px-3 py-2.5 rounded-lg flex-shrink-0 self-end transition-all disabled:opacity-30"
           style={{ background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff" }}
           title="Send"

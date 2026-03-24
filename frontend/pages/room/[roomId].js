@@ -257,13 +257,21 @@ export default function RoomPage() {
   }, [identity, roomId]);
 
   /* ── Actions ─────────────────────────────────────────────────────────── */
-  const sendMessage = useCallback((content, replyTo = null) => {
+  const sendMessage = useCallback((payload, replyTo = null) => {
     if (!identity || !roomId) return;
+
+    const isObjectPayload = payload && typeof payload === "object";
+    const content = isObjectPayload ? String(payload.content || "") : String(payload || "");
+    const type = isObjectPayload ? String(payload.type || "text") : "text";
+    const attachment = isObjectPayload ? (payload.attachment || null) : null;
+
     socketRef.current?.emit("send_message", {
       roomId,
       guestId:     identity.guestId,
       displayName: identity.displayName,
       content,
+      type,
+      attachment,
       replyTo,
     });
     socketRef.current?.emit("typing_status", {

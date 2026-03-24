@@ -72,10 +72,38 @@ module.exports = (io) => {
     });
 
     // ── send_message ─────────────────────────────────────────────────────────
-    socket.on("send_message", async ({ roomId, guestId, displayName, content, replyTo = null }) => {
+    socket.on("send_message", async ({
+      roomId,
+      guestId,
+      displayName,
+      content,
+      type = "text",
+      attachment = null,
+      replyTo = null,
+    }) => {
       try {
         const trimmed = typeof content === "string" ? content.trim() : "";
-        if (!trimmed) return;
+
+        if (type === "text" && !trimmed) return;
+
+        let safeAttachment = null;
+        if (type === "attachment") {
+          if (!attachment || typeof attachment !== "object") return;
+
+          const dataUrl = typeof attachment.dataUrl === "string" ? attachment.dataUrl : "";
+          const fileName = typeof attachment.fileName === "string" ? attachment.fileName : "file";
+          const mimeType = typeof attachment.mimeType === "string" ? attachment.mimeType : "application/octet-stream";
+          const size = Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : 0;
+
+          // 3MB safety cap for in-memory/base64 transport
+          if (!dataUrl || dataUrl.length > 3 * 1024 * 1024 * 1.5) {
+            socket.emit("room_error", { message: "Attachment too large. Keep files under 3MB." });
+            return;
+          }
+
+          const kind = mimeType.startsWith("image/") ? "image" : "file";
+          safeAttachment = { dataUrl, fileName, mimeType, size, kind };
+        }
 
         const msg = {
           id:          uuidv4(),
@@ -84,7 +112,8 @@ module.exports = (io) => {
           senderName:  displayName,
           content:     trimmed,
           timestamp:   Date.now(),
-          type:        "text",
+          type,
+          attachment:  safeAttachment,
           replyTo:     null,
           reactions:   {},
         };
