@@ -3,6 +3,13 @@ import { useState, useEffect, useRef } from "react";
 const QUICK_REACTIONS = ["👍", "🔥", "😂", "👏", "💡"];
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
+function formatDuration(totalSec = 0) {
+  const sec = Math.max(0, Math.floor(totalSec));
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
 function formatSize(bytes = 0) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
@@ -70,6 +77,7 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
   if (msg.type === "attachment") {
     const attachment = msg.attachment || {};
     const isImage = attachment.kind === "image";
+    const isAudio = attachment.kind === "audio";
     return (
       <div className={`flex items-end gap-2 mb-2 msg-enter ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
         {!isOwn && (
@@ -109,6 +117,21 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
                   style={{ border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.2)" }}
                 />
               </a>
+            ) : isAudio ? (
+              <div
+                className="rounded-lg px-2.5 py-2"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", minWidth: 240 }}
+              >
+                <audio controls src={attachment.dataUrl} className="w-full h-9" />
+                <div className="flex items-center justify-between mt-1.5 text-[10px]" style={{ color: "rgba(255,255,255,0.65)" }}>
+                  <span className="truncate mr-3" title={attachment.fileName || "voice-note.webm"}>
+                    {attachment.fileName || "voice-note.webm"}
+                  </span>
+                  <a href={attachment.dataUrl} download={attachment.fileName || "voice-note.webm"} className="underline underline-offset-2">
+                    Download
+                  </a>
+                </div>
+              </div>
             ) : (
               <a
                 href={attachment.dataUrl}
@@ -257,10 +280,16 @@ export default function ChatPanel({
   const [replyTarget, setReplyTarget] = useState(null);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [attachErr, setAttachErr] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSec, setRecordSec] = useState(0);
   const bottomRef = useRef(null);
   const typingRef = useRef(false);
   const idleTimerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordChunksRef = useRef([]);
+  const recordStreamRef = useRef(null);
+  const recordTimerRef = useRef(null);
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -271,6 +300,13 @@ export default function ChatPanel({
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       if (typingRef.current) onTypingChange(false);
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      if (recordStreamRef.current) {
+        recordStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
     };
   }, [onTypingChange]);
 
@@ -294,6 +330,11 @@ export default function ChatPanel({
   };
 
   const handleSend = () => {
+    if (isRecording) {
+      setAttachErr("Stop recording before sending.");
+      return;
+    }
+
     const trimmed = text.trim();
     if (!trimmed && !pendingAttachment) return;
     const replyTo = replyTarget
@@ -345,12 +386,81 @@ export default function ChatPanel({
         mimeType: file.type || "application/octet-stream",
         size: file.size,
         dataUrl,
-        kind: file.type.startsWith("image/") ? "image" : "file",
+        kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : "file",
       });
       setAttachErr("");
     } catch (err) {
       setAttachErr(err.message || "Unable to read selected file.");
       setPendingAttachment(null);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      setAttachErr("");
+      setPendingAttachment(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let recorder;
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+      recordStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordChunksRef.current = [];
+      setRecordSec(0);
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          recordChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        try {
+          const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+          if (blob.size <= 0) return;
+          if (blob.size > MAX_ATTACHMENT_BYTES) {
+            setAttachErr("Voice note too large. Max 3MB.");
+            return;
+          }
+
+          const dataUrl = await readFileAsDataUrl(blob);
+          setPendingAttachment({
+            fileName: `voice-note-${Date.now()}.webm`,
+            mimeType: blob.type || "audio/webm",
+            size: blob.size,
+            dataUrl,
+            kind: "audio",
+          });
+        } finally {
+          if (recordStreamRef.current) {
+            recordStreamRef.current.getTracks().forEach((t) => t.stop());
+            recordStreamRef.current = null;
+          }
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      recordTimerRef.current = setInterval(() => setRecordSec((s) => s + 1), 1000);
+    } catch (_err) {
+      setAttachErr("Microphone permission denied or unavailable.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    setIsRecording(false);
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
     }
   };
 
@@ -416,7 +526,11 @@ export default function ChatPanel({
             >
               <div className="min-w-0">
                 <p className="font-semibold" style={{ color: "#93c5fd" }}>
-                  {pendingAttachment.kind === "image" ? "Image ready" : "File ready"}
+                  {pendingAttachment.kind === "image"
+                    ? "Image ready"
+                    : pendingAttachment.kind === "audio"
+                      ? "Voice note ready"
+                      : "File ready"}
                 </p>
                 <p className="truncate" style={{ color: "rgba(255,255,255,0.72)" }}>
                   {pendingAttachment.fileName} ({formatSize(pendingAttachment.size)})
@@ -440,6 +554,23 @@ export default function ChatPanel({
             <p className="text-[11px]" style={{ color: "#fca5a5" }}>{attachErr}</p>
           )}
 
+          {isRecording && (
+            <div
+              className="px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-3"
+              style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.28)" }}
+            >
+              <p style={{ color: "#fca5a5" }}>Recording voice note... {formatDuration(recordSec)}</p>
+              <button
+                onClick={stopRecording}
+                className="px-2 py-1 rounded"
+                style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}
+                title="Stop recording"
+              >
+                Stop
+              </button>
+            </div>
+          )}
+
         <textarea
           className="flex-1 blip-input resize-none min-h-[40px] max-h-[120px] py-2 leading-snug"
           rows={1}
@@ -455,7 +586,7 @@ export default function ChatPanel({
           type="file"
           onChange={handlePickAttachment}
           className="hidden"
-          accept="image/*,.pdf,.txt,.md,.json,.csv,.zip,.rar,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+          accept="image/*,audio/*,.pdf,.txt,.md,.json,.csv,.zip,.rar,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
         />
 
         <button
@@ -470,8 +601,24 @@ export default function ChatPanel({
         </button>
 
         <button
+          onClick={() => (isRecording ? stopRecording() : startRecording())}
+          className="px-2.5 py-2.5 rounded-lg flex-shrink-0 self-end transition-all"
+          style={isRecording
+            ? { background: "rgba(220,38,38,0.22)", color: "#fca5a5" }
+            : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.72)" }
+          }
+          title={isRecording ? "Stop voice recording" : "Record voice note"}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            {isRecording
+              ? <path d="M6 6h8v8H6z" />
+              : <path d="M10 3a3 3 0 00-3 3v4a3 3 0 106 0V6a3 3 0 00-3-3zM5 9a1 1 0 112 0 3 3 0 006 0 1 1 0 112 0 5 5 0 01-4 4.9V16h2a1 1 0 110 2H7a1 1 0 010-2h2v-2.1A5 5 0 015 9z" />}
+          </svg>
+        </button>
+
+        <button
           onClick={handleSend}
-          disabled={!text.trim() && !pendingAttachment}
+          disabled={isRecording || (!text.trim() && !pendingAttachment)}
           className="px-3 py-2.5 rounded-lg flex-shrink-0 self-end transition-all disabled:opacity-30"
           style={{ background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff" }}
           title="Send"

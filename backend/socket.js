@@ -101,7 +101,11 @@ module.exports = (io) => {
             return;
           }
 
-          const kind = mimeType.startsWith("image/") ? "image" : "file";
+          const kind = mimeType.startsWith("image/")
+            ? "image"
+            : mimeType.startsWith("audio/")
+              ? "audio"
+              : "file";
           safeAttachment = { dataUrl, fileName, mimeType, size, kind };
         }
 
