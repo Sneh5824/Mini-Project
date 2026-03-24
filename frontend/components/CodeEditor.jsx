@@ -94,6 +94,47 @@ function sanitizeCursorShape(cursorData) {
   return { position, selection };
 }
 
+const CURSOR_COLORS = [
+  "#f59e0b", // amber
+  "#22c55e", // green
+  "#3b82f6", // blue
+  "#e879f9", // fuchsia
+  "#fb7185", // rose
+  "#14b8a6", // teal
+  "#a3e635", // lime
+  "#f97316", // orange
+  "#60a5fa", // light blue
+  "#c084fc", // violet
+];
+
+function hashGuestId(guestId = "") {
+  let hash = 0;
+  for (let i = 0; i < guestId.length; i += 1) {
+    hash = (hash << 5) - hash + guestId.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function colorForGuest(guestId) {
+  return CURSOR_COLORS[hashGuestId(guestId) % CURSOR_COLORS.length];
+}
+
+function hexToRgba(hex, alpha) {
+  const clean = hex.replace("#", "");
+  const full = clean.length === 3
+    ? clean.split("").map((ch) => ch + ch).join("")
+    : clean;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function classSuffixForGuest(guestId = "") {
+  return `u${hashGuestId(guestId)}`;
+}
+
 export default function CodeEditor({
   code,
   onCodeChange,
@@ -120,6 +161,8 @@ export default function CodeEditor({
   const monacoRef = useRef(null);
   const decorationIdsRef = useRef([]);
   const editorDisposablesRef = useRef([]);
+  const dynamicStyleRef = useRef(null);
+  const injectedUsersRef = useRef(new Set());
   const nextTestIdRef = useRef(3);
 
   const displayCode = code || PLACEHOLDERS[lang];
@@ -131,7 +174,37 @@ export default function CodeEditor({
     return () => {
       editorDisposablesRef.current.forEach((d) => d?.dispose?.());
       editorDisposablesRef.current = [];
+      if (dynamicStyleRef.current?.parentNode) {
+        dynamicStyleRef.current.parentNode.removeChild(dynamicStyleRef.current);
+      }
     };
+  }, []);
+
+  const ensureCursorStyles = useCallback((guestId) => {
+    if (!guestId || injectedUsersRef.current.has(guestId)) return;
+
+    if (!dynamicStyleRef.current) {
+      dynamicStyleRef.current = document.createElement("style");
+      dynamicStyleRef.current.setAttribute("data-blip-cursor-styles", "1");
+      document.head.appendChild(dynamicStyleRef.current);
+    }
+
+    const color = colorForGuest(guestId);
+    const suffix = classSuffixForGuest(guestId);
+    const cursorClass = `.monaco-editor .blip-remote-cursor-${suffix}`;
+    const selectionClass = `.monaco-editor .blip-remote-selection-${suffix}`;
+    dynamicStyleRef.current.appendChild(document.createTextNode(`
+${cursorClass} {
+  border-left: 2px solid ${color};
+  background: ${hexToRgba(color, 0.22)};
+}
+${selectionClass} {
+  background: ${hexToRgba(color, 0.18)};
+  border-radius: 2px;
+}
+`));
+
+    injectedUsersRef.current.add(guestId);
   }, []);
 
   useEffect(() => {
@@ -147,6 +220,9 @@ export default function CodeEditor({
       const clean = sanitizeCursorShape(cursor);
       if (!clean) continue;
 
+      ensureCursorStyles(cursor.guestId);
+      const suffix = classSuffixForGuest(cursor.guestId);
+
       if (clean.selection) {
         const { startLineNumber, startColumn, endLineNumber, endColumn } = clean.selection;
         const hasRange = startLineNumber !== endLineNumber || startColumn !== endColumn;
@@ -154,7 +230,7 @@ export default function CodeEditor({
           next.push({
             range: new monaco.Range(startLineNumber, startColumn, endLineNumber, endColumn),
             options: {
-              className: "blip-remote-selection",
+              className: `blip-remote-selection-${suffix}`,
               hoverMessage: { value: `${cursor.displayName || "Participant"} selection` },
             },
           });
@@ -166,7 +242,7 @@ export default function CodeEditor({
         next.push({
           range: new monaco.Range(lineNumber, column, lineNumber, column + 1),
           options: {
-            className: "blip-remote-cursor",
+            className: `blip-remote-cursor-${suffix}`,
             hoverMessage: { value: `${cursor.displayName || "Participant"} cursor` },
           },
         });
@@ -174,7 +250,7 @@ export default function CodeEditor({
     }
 
     decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, next);
-  }, [remoteCursors, currentGuestId]);
+  }, [remoteCursors, currentGuestId, ensureCursorStyles]);
 
   const publishLocalCursor = useCallback(() => {
     const editor = editorRef.current;
