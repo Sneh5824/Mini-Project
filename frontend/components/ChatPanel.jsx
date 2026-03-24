@@ -119,18 +119,30 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
               </a>
             ) : isAudio ? (
               <div
-                className="rounded-lg px-2.5 py-2"
-                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", minWidth: 240 }}
+                className="rounded-xl px-3 py-2.5"
+                style={{
+                  background: "linear-gradient(180deg,rgba(255,255,255,0.10),rgba(255,255,255,0.06))",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  minWidth: 260,
+                  maxWidth: 360,
+                }}
               >
-                <audio controls src={attachment.dataUrl} className="w-full h-9" />
-                <div className="flex items-center justify-between mt-1.5 text-[10px]" style={{ color: "rgba(255,255,255,0.65)" }}>
-                  <span className="truncate mr-3" title={attachment.fileName || "voice-note.webm"}>
-                    {attachment.fileName || "voice-note.webm"}
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                    style={{ background: "rgba(34,197,94,0.18)", color: "#86efac" }}
+                    aria-hidden
+                  >
+                    ♪
                   </span>
-                  <a href={attachment.dataUrl} download={attachment.fileName || "voice-note.webm"} className="underline underline-offset-2">
-                    Download
-                  </a>
+                  <p className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.86)" }}>
+                    Voice Note
+                  </p>
+                  <span className="text-[10px] ml-auto" style={{ color: "rgba(255,255,255,0.52)" }}>
+                    {formatSize(attachment.size || 0)}
+                  </span>
                 </div>
+                <audio controls src={attachment.dataUrl} className="w-full h-9" />
               </div>
             ) : (
               <a
