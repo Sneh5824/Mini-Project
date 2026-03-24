@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { getOrCreateIdentity, markAsHost } from "../lib/identity";
@@ -46,6 +46,7 @@ const POSTER_LINES = [
 
 export default function Home() {
   const router  = useRouter();
+  const autoJoinDoneRef = useRef(false);
   const [identity, setIdentity]   = useState(null);
   const [roomType, setRoomType]   = useState("coding");
   const [timeout,  setTimeoutVal] = useState(30);
@@ -102,8 +103,8 @@ export default function Home() {
   };
 
   /* ── Join room ─────────────────────────────────────────────────────────── */
-  const handleJoin = async () => {
-    const rid = joinId.trim().toUpperCase();
+  const handleJoinById = useCallback(async (rawRoomId) => {
+    const rid = (rawRoomId || "").trim().toUpperCase();
     if (!rid || joining) return;
     setJoining(true);
     setJoinErr("");
@@ -119,7 +120,30 @@ export default function Home() {
     } finally {
       setJoining(false);
     }
+  }, [joining, router]);
+
+  const handleJoin = async () => {
+    await handleJoinById(joinId);
   };
+
+  useEffect(() => {
+    if (!router.isReady || !identity || autoJoinDoneRef.current) return;
+
+    const rawInvite = typeof router.query.invite === "string" ? router.query.invite : "";
+    if (!rawInvite) return;
+
+    const normalized = rawInvite.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,8}$/.test(normalized)) return;
+
+    autoJoinDoneRef.current = true;
+    setTab("join");
+    setJoinId(normalized);
+
+    const mode = typeof router.query.mode === "string" ? router.query.mode.toLowerCase() : "";
+    if (mode === "chat" || mode === "coding") setRoomType(mode);
+
+    handleJoinById(normalized);
+  }, [router.isReady, router.query, identity, handleJoinById]);
 
   return (
     <>

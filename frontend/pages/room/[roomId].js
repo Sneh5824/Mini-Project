@@ -89,6 +89,8 @@ export default function RoomPage() {
   const [probInput,    setProbInput]    = useState("");
   const [probLink,     setProbLink]     = useState("");
   const [copied,       setCopied]       = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [exported,     setExported]     = useState(false);
   const [showEndDlg,   setShowEndDlg]   = useState(false);
   const [mobileSide,   setMobileSide]   = useState(false);
 
@@ -332,6 +334,86 @@ export default function RoomPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const copyInviteLink = async () => {
+    if (typeof window === "undefined" || !roomId) return;
+    const mode = room?.roomType || "chat";
+    const inviteUrl = `${window.location.origin}/?invite=${encodeURIComponent(roomId)}&mode=${encodeURIComponent(mode)}`;
+    await navigator.clipboard.writeText(inviteUrl);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2000);
+  };
+
+  const exportSessionSnapshot = () => {
+    if (!roomId) return;
+
+    const lines = [];
+    lines.push("BLIP SESSION SNAPSHOT");
+    lines.push("======================");
+    lines.push(`Room ID: ${roomId}`);
+    lines.push(`Room Name: ${room?.roomName || "(unnamed)"}`);
+    lines.push(`Room Type: ${room?.roomType || "unknown"}`);
+    lines.push(`Created At: ${room?.createdAt ? new Date(room.createdAt).toISOString() : "unknown"}`);
+    lines.push(`Exported At: ${new Date().toISOString()}`);
+    lines.push("");
+
+    lines.push("PARTICIPANTS");
+    lines.push("------------");
+    participants.forEach((p, i) => {
+      const role = p.guestId === room?.hostId ? "HOST" : "MEMBER";
+      lines.push(`${i + 1}. ${p.displayName} (${role}) [${p.guestId}]`);
+    });
+    if (participants.length === 0) lines.push("(none)");
+    lines.push("");
+
+    lines.push("MESSAGES");
+    lines.push("--------");
+    messages.forEach((m) => {
+      const when = m.timestamp ? new Date(m.timestamp).toISOString() : "unknown-time";
+      if (m.type === "system") {
+        lines.push(`[${when}] [SYSTEM] ${m.content}`);
+        return;
+      }
+
+      const sender = m.senderName || "Unknown";
+      const msgType = m.type || "text";
+      const base = `[${when}] [${sender}] (${msgType}) ${m.content || ""}`;
+      lines.push(base);
+
+      if (m.replyTo?.content) {
+        lines.push(`  ↳ reply to ${m.replyTo.senderName || "Unknown"}: ${m.replyTo.content}`);
+      }
+
+      if (m.reactions && Object.keys(m.reactions).length > 0) {
+        const reactionSummary = Object.entries(m.reactions)
+          .map(([emoji, users]) => `${emoji} x${Array.isArray(users) ? users.length : 0}`)
+          .join(", ");
+        lines.push(`  ↳ reactions: ${reactionSummary}`);
+      }
+    });
+    if (messages.length === 0) lines.push("(none)");
+    lines.push("");
+
+    lines.push("CODE");
+    lines.push("----");
+    lines.push(code || "(empty)");
+    lines.push("");
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeRoom = String(roomId).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    a.href = url;
+    a.download = `blip-session-${safeRoom}-${ts}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setExported(true);
+    setTimeout(() => setExported(false), 2000);
+  };
+
   const goHome = () => { destroySocket(); router.push("/"); };
 
   /* ── Render: Loading ─────────────────────────────────────────────────── */
@@ -401,6 +483,20 @@ export default function RoomPage() {
 
           <div className="w-px h-5 mx-1 flex-shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
 
+          {/* Invite link */}
+          <button
+            onClick={copyInviteLink}
+            className="flex items-center gap-1.5 transition-colors flex-shrink-0 hover:text-white"
+            style={{ color: inviteCopied ? "#34d399" : "rgba(255,255,255,0.35)" }}
+            title="Copy Invite Link"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M12.59 7.41a1 1 0 010 1.41L10.41 11a1 1 0 01-1.41-1.41l2.17-2.18a1 1 0 011.42 0z" />
+              <path d="M6.88 13.12a3 3 0 010-4.24l2.12-2.12a3 3 0 114.24 4.24l-.7.7a1 1 0 11-1.42-1.41l.7-.7a1 1 0 10-1.41-1.42L8.29 10.3a1 1 0 001.41 1.41 1 1 0 111.42 1.41 3 3 0 01-4.24 0z" />
+            </svg>
+            <span className="text-xs font-medium">{inviteCopied ? "Copied" : "Invite"}</span>
+          </button>
+
           {/* Room ID + copy */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-xs hidden sm:block" style={{ color: "rgba(255,255,255,0.25)" }}>Room</span>
@@ -453,17 +549,29 @@ export default function RoomPage() {
             <span className="text-sm font-medium">{participants.length}</span>
           </button>
 
-          {/* End Room button (host only) */}
+          {/* Host actions */}
           {isHost && (
-            <button
-              onClick={() => setShowEndDlg(true)}
-              className="ml-1 flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg uppercase tracking-wider transition-all"
-              style={{ background: "rgba(220,38,38,0.12)", border: "1px solid rgba(220,38,38,0.28)", color: "#f87171" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.22)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.12)"; }}
-            >
-              End Room
-            </button>
+            <>
+              <button
+                onClick={exportSessionSnapshot}
+                className="ml-1 flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg uppercase tracking-wider transition-all"
+                style={exported
+                  ? { background: "rgba(16,185,129,0.22)", border: "1px solid rgba(16,185,129,0.35)", color: "#6ee7b7" }
+                  : { background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", color: "#fcd34d" }
+                }
+              >
+                {exported ? "Exported" : "Export"}
+              </button>
+              <button
+                onClick={() => setShowEndDlg(true)}
+                className="ml-1 flex-shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg uppercase tracking-wider transition-all"
+                style={{ background: "rgba(220,38,38,0.12)", border: "1px solid rgba(220,38,38,0.28)", color: "#f87171" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.22)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.12)"; }}
+              >
+                End Room
+              </button>
+            </>
           )}
         </header>
 
