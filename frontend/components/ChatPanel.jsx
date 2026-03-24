@@ -312,6 +312,7 @@ export default function ChatPanel({
   const [attachErr, setAttachErr] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
   const bottomRef = useRef(null);
   const typingRef = useRef(false);
   const idleTimerRef = useRef(null);
@@ -321,6 +322,10 @@ export default function ChatPanel({
   const recordStreamRef = useRef(null);
   const recordTimerRef = useRef(null);
   const recordSecRef = useRef(0);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const meterRafRef = useRef(null);
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -332,6 +337,11 @@ export default function ChatPanel({
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       if (typingRef.current) onTypingChange(false);
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      if (meterRafRef.current) cancelAnimationFrame(meterRafRef.current);
+      if (sourceNodeRef.current) sourceNodeRef.current.disconnect();
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close();
+      }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
@@ -426,6 +436,65 @@ export default function ChatPanel({
     }
   };
 
+  const stopMicMeter = useCallback(() => {
+    if (meterRafRef.current) {
+      cancelAnimationFrame(meterRafRef.current);
+      meterRafRef.current = null;
+    }
+
+    if (sourceNodeRef.current) {
+      try { sourceNodeRef.current.disconnect(); } catch {}
+      sourceNodeRef.current = null;
+    }
+
+    analyserRef.current = null;
+
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close();
+    }
+    audioContextRef.current = null;
+    setMicLevel(0);
+  }, []);
+
+  const startMicMeter = useCallback((stream) => {
+    stopMicMeter();
+
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+
+    const ctx = new Ctx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.78;
+
+    const source = ctx.createMediaStreamSource(stream);
+    source.connect(analyser);
+
+    audioContextRef.current = ctx;
+    analyserRef.current = analyser;
+    sourceNodeRef.current = source;
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    const tick = () => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteTimeDomainData(data);
+
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const normalized = Math.min(1, Math.max(0, rms * 2.2));
+      setMicLevel(normalized);
+
+      meterRafRef.current = requestAnimationFrame(tick);
+    };
+
+    meterRafRef.current = requestAnimationFrame(tick);
+  }, [stopMicMeter]);
+
   const startRecording = async () => {
     try {
       setAttachErr("");
@@ -447,6 +516,7 @@ export default function ChatPanel({
         recorder = new MediaRecorder(stream);
       }
       recordStreamRef.current = stream;
+      startMicMeter(stream);
       mediaRecorderRef.current = recorder;
       recordChunksRef.current = [];
       setRecordSec(0);
@@ -482,6 +552,7 @@ export default function ChatPanel({
             setAttachErr("Recorded too short. Hold record for at least 1 second.");
           }
         } finally {
+          stopMicMeter();
           if (recordStreamRef.current) {
             recordStreamRef.current.getTracks().forEach((t) => t.stop());
             recordStreamRef.current = null;
@@ -499,6 +570,7 @@ export default function ChatPanel({
         });
       }, 1000);
     } catch (_err) {
+      stopMicMeter();
       setAttachErr("Microphone permission denied or unavailable.");
     }
   };
@@ -513,6 +585,8 @@ export default function ChatPanel({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
+
+    stopMicMeter();
   };
 
   return (
@@ -610,7 +684,15 @@ export default function ChatPanel({
               className="px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-3"
               style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.28)" }}
             >
-              <p style={{ color: "#fca5a5" }}>Recording voice note... {formatDuration(recordSec)}</p>
+              <div className="flex-1 min-w-0">
+                <p style={{ color: "#fca5a5" }}>Recording voice note... {formatDuration(recordSec)}</p>
+                <div className="mt-1 h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.12)" }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${Math.max(4, Math.round(micLevel * 100))}%`, background: "linear-gradient(90deg,#22c55e,#f59e0b,#ef4444)" }}
+                  />
+                </div>
+              </div>
               <button
                 onClick={stopRecording}
                 className="px-2 py-1 rounded"
