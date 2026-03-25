@@ -41,14 +41,26 @@ function generateRoomName() {
 }
 
 // ─── Room CRUD ────────────────────────────────────────────────────────────────
-async function createRoom({ hostId, hostName, roomType, timeout, roomName = null }) {
-  const roomId    = generateRoomId();
+async function createRoom({ hostId, hostName, roomType, timeout, roomName = null, visibility = "private", roomId = null }) {
+  const finalRoomId = (roomId && String(roomId).trim().toUpperCase()) || generateRoomId();
   const now       = Date.now();
   const expiresAt = now + timeout * 60 * 1000;
   const finalName = (roomName && roomName.trim()) ? roomName.trim() : generateRoomName();
 
-  const room = { roomId, hostId, hostName, roomType, timeout, roomName: finalName, createdAt: now, expiresAt, status: "active", problemLink: null };
-  await redis.set(K.room(roomId), JSON.stringify(room));
+  const room = {
+    roomId: finalRoomId,
+    hostId,
+    hostName,
+    roomType,
+    timeout,
+    visibility,
+    roomName: finalName,
+    createdAt: now,
+    expiresAt,
+    status: "active",
+    problemLink: null,
+  };
+  await redis.set(K.room(finalRoomId), JSON.stringify(room));
   return room;
 }
 

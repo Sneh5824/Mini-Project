@@ -4,6 +4,7 @@ const http    = require("http");
 const cors    = require("cors");
 const { Server } = require("socket.io");
 const sm = require("./sessionManager");
+const redis = require("./redisClient");
 
 const app = express();
 
@@ -16,12 +17,17 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
+const SYSTEM_PUBLIC_ROOM_SPECS = [
+  { roomId: "PUB10M", timeout: 10 },
+  { roomId: "PUB20M", timeout: 20 },
+];
+
 // ─── REST API ────────────────────────────────────────────────────────────────
 
 // POST /api/rooms  — create a new room
 app.post("/api/rooms", async (req, res) => {
   try {
-    const { guestId, displayName, roomType, timeout, roomName } = req.body;
+    const { guestId, displayName, roomType, timeout, roomName, visibility = "private" } = req.body;
     if (!guestId || !displayName || !roomType || !timeout) {
       return res.status(400).json({ error: "Missing required fields." });
     }
@@ -30,10 +36,24 @@ app.post("/api/rooms", async (req, res) => {
     }
     const validTypes    = ["chat", "coding"];
     const validTimeouts = [10, 20, 30, 60];
+    const validVisibility = ["private"];
     if (!validTypes.includes(roomType))    return res.status(400).json({ error: "Invalid roomType." });
     if (!validTimeouts.includes(timeout))  return res.status(400).json({ error: "Invalid timeout." });
+    if (!validVisibility.includes(visibility)) return res.status(400).json({ error: "Invalid room visibility." });
 
-    const room = await sm.createRoom({ hostId: guestId, hostName: displayName, roomType, timeout, roomName: (roomName && roomName.trim()) || null });
+    if (visibility !== "private") return res.status(400).json({ error: "Public rooms are system-managed only." });
+
+    const hostId = guestId;
+    const hostName = displayName;
+
+    const room = await sm.createRoom({
+      hostId,
+      hostName,
+      roomType,
+      timeout,
+      visibility,
+      roomName: (roomName && roomName.trim()) || null,
+    });
 
     // Arm the expiry timer immediately
     const delay = room.expiresAt - Date.now();
@@ -59,6 +79,7 @@ app.get("/api/rooms/:roomId", async (req, res) => {
     res.json({
       roomId:    room.roomId,
       roomType:  room.roomType,
+      visibility: room.visibility || "private",
       roomName:  room.roomName || null,
       timeout:   room.timeout,
       createdAt: room.createdAt,
@@ -70,6 +91,84 @@ app.get("/api/rooms/:roomId", async (req, res) => {
     res.status(500).json({ error: "Internal server error." });
   }
 });
+
+// GET /api/public-rooms  — list active public rooms
+app.get("/api/public-rooms", async (_req, res) => {
+  try {
+    const roomKeys = SYSTEM_PUBLIC_ROOM_SPECS.map((s) => `room:${s.roomId}`);
+    const roomsRaw = await redis.mGet(roomKeys);
+    const now = Date.now();
+    const publicRooms = [];
+
+    for (const raw of roomsRaw) {
+      if (!raw) continue;
+      const room = JSON.parse(raw);
+      if (!room || room.status !== "active") continue;
+      if ((room.visibility || "private") !== "public") continue;
+      if (Number(room.expiresAt || 0) <= now) continue;
+
+      const participants = await sm.getParticipants(room.roomId);
+      publicRooms.push({
+        roomId: room.roomId,
+        roomName: room.roomName || null,
+        roomType: room.roomType,
+        visibility: "public",
+        timeout: room.timeout,
+        createdAt: room.createdAt,
+        expiresAt: room.expiresAt,
+        participantCount: participants.length,
+      });
+    }
+
+    publicRooms.sort((a, b) => a.timeout - b.timeout);
+    res.json({ rooms: publicRooms });
+  } catch (err) {
+    console.error("[API] GET /api/public-rooms error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+async function ensureSystemPublicRoom(io, spec) {
+  const existing = await sm.getRoom(spec.roomId);
+  const now = Date.now();
+
+  if (!existing || existing.status !== "active" || Number(existing.expiresAt || 0) <= now) {
+    if (existing) {
+      sm.clearRoomTimer(spec.roomId);
+      await sm.deleteRoom(spec.roomId);
+      io.to(spec.roomId).emit("room_expired", {
+        message: "This room has expired. A fresh public room has been started.",
+      });
+    }
+
+    const room = await sm.createRoom({
+      roomId: spec.roomId,
+      hostId: null,
+      hostName: null,
+      roomType: "chat",
+      timeout: spec.timeout,
+      visibility: "public",
+      roomName: null,
+    });
+
+    const delay = room.expiresAt - Date.now();
+    sm.setRoomTimer(spec.roomId, delay, async () => {
+      await ensureSystemPublicRoom(io, spec);
+    });
+    return;
+  }
+
+  const delay = Number(existing.expiresAt || 0) - now;
+  sm.setRoomTimer(spec.roomId, delay, async () => {
+    await ensureSystemPublicRoom(io, spec);
+  });
+}
+
+async function initializeSystemPublicRooms(io) {
+  for (const spec of SYSTEM_PUBLIC_ROOM_SPECS) {
+    await ensureSystemPublicRoom(io, spec);
+  }
+}
 
 // ─── Helper (mirrors socket.js expireRoom but used by REST timer) ─────────────
 async function expireRoomREST(io, roomId) {
@@ -224,6 +323,11 @@ require("./socket")(io);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
+  try {
+    await initializeSystemPublicRooms(io);
+  } catch (err) {
+    console.error("[Server] Failed to initialize system public rooms:", err.message);
+  }
   console.log(`[Server] Blip backend running on http://localhost:${PORT}`);
 });

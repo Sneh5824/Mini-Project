@@ -1,33 +1,42 @@
 ﻿# Blip
 
-Real-time, timed, anonymous collaboration rooms for chat and coding.
+Blip is a real-time, anonymous, timed collaboration platform for fast chat and coding sessions.
 
-Blip is an ephemeral platform where users join with anonymous identities, collaborate in real time, and leave no persistent history after room expiry.
+No sign-up, no accounts, and room data is removed automatically when time runs out.
 
-## Overview
+## Highlights
 
-Blip is designed for quick, focused collaboration sessions:
-
-- Create short-lived rooms with configurable time limits
-- Join anonymously with generated display names
-- Chat instantly in all room types
-- Collaborate on shared code in coding rooms
-- Auto-expire rooms and remove all associated data from Redis
-
-## Key Features
-
-- Anonymous identity generation (no sign-up required)
+- Anonymous identities with random display names
 - Two room modes:
-  - Chat Room
-  - Coding Room (Monaco editor + shared code sync)
-- Real-time updates using Socket.IO:
-  - messages
-  - participants
-  - code changes
-- Host controls:
-  - share problem links
-  - end room manually
-- Automatic room expiry and data cleanup
+  - Chat
+  - Coding (shared Monaco editor)
+- Rich real-time chat:
+  - replies and reactions
+  - typing indicators
+  - image/file attachments
+  - voice notes
+  - URL link preview side panel (resizable)
+- Public join flow:
+  - system-provided public rooms (`PUB10M`, `PUB20M`)
+  - no invitation code needed
+  - no host role in public rooms
+  - room names are randomly generated
+- Private room controls:
+  - invite link copy
+  - host export snapshot
+  - host end room
+- Fully responsive UI improvements for mobile and desktop
+
+## Public Room Model
+
+Public rooms are not user-created.
+
+The backend maintains two rotating public chat rooms:
+
+- `PUB10M` (10 minutes)
+- `PUB20M` (20 minutes)
+
+When they expire, they are recreated automatically with fresh random names.
 
 ## Tech Stack
 
@@ -37,117 +46,9 @@ Blip is designed for quick, focused collaboration sessions:
 | Realtime | Socket.IO |
 | Editor | @monaco-editor/react |
 | Backend | Node.js, Express |
-| Data Store | Redis |
+| Data | Redis |
 
-## Architecture
-
-- `frontend/`: UI, room flows, chat panel, timer, coding editor
-- `backend/`: REST API, room lifecycle, socket event orchestration
-- `redis`: stores room/session data while a room is active
-
-When a room expires or is ended by host, related Redis keys are deleted.
-
-## Prerequisites
-
-- Node.js 18+
-- npm 9+
-- Redis 6+ (local or Docker)
-
-## Local Setup
-
-### 1) Clone repository
-
-```bash
-git clone https://github.com/Sneh5824/Mini-Project.git
-cd "Mini Project"
-```
-
-### 2) Install dependencies
-
-```bash
-cd backend
-npm install
-
-cd ../frontend
-npm install
-```
-
-### 3) Start Redis
-
-Option A: Docker
-
-```bash
-docker compose up -d
-```
-
-Option B: Local Redis service
-
-```bash
-redis-server
-```
-
-### 4) Run backend
-
-```bash
-cd backend
-npm run dev
-```
-
-Backend URL: http://localhost:5001
-
-### 5) Run frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend URL: http://localhost:3000
-
-## API Endpoints
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| POST | `/api/rooms` | Create a room |
-| GET | `/api/rooms/:roomId` | Validate room / fetch room status |
-| GET | `/health` | Health check |
-
-## Socket Events
-
-### Client -> Server
-
-| Event | Payload |
-| --- | --- |
-| `join_room` | `{ roomId, guestId, displayName }` |
-| `send_message` | `{ roomId, guestId, displayName, content }` |
-| `code_update` | `{ roomId, code }` |
-| `share_problem` | `{ roomId, guestId, displayName, link }` |
-| `end_room` | `{ roomId, guestId }` |
-
-### Server -> Client
-
-| Event | Description |
-| --- | --- |
-| `room_joined` | Initial room payload (room, participants, messages, code) |
-| `receive_message` | New chat message |
-| `code_updated` | Updated shared code |
-| `participants_update` | Participant list changed |
-| `user_joined` | Join notification |
-| `user_left` | Leave notification |
-| `problem_shared` | Shared problem link broadcast |
-| `room_expired` | Room expired and cleaned up |
-| `room_error` | Join/room operation error |
-
-## Redis Key Schema
-
-| Key Pattern | Type | Purpose |
-| --- | --- | --- |
-| `room:{roomId}` | String | Room metadata |
-| `participants:{roomId}` | List | Participant records |
-| `messages:{roomId}` | List | Active room messages |
-| `code:{roomId}` | String | Shared editor content |
-
-## Project Structure
+## Repository Structure
 
 ```text
 .
@@ -159,37 +60,128 @@ Frontend URL: http://localhost:3000
 |   `-- socket.js
 |-- frontend/
 |   |-- components/
-|   |   |-- ChatPanel.jsx
-|   |   |-- CodeEditor.jsx
-|   |   |-- ParticipantList.jsx
-|   |   |-- SnapExpired.jsx
-|   |   `-- Timer.jsx
 |   |-- lib/
-|   |   |-- identity.js
-|   |   `-- socket.js
 |   |-- pages/
-|   |   |-- index.js
-|   |   `-- room/[roomId].js
-|   `-- styles/globals.css
+|   `-- styles/
 |-- docker-compose.yml
 `-- README.md
 ```
 
-## Demo Flow
+## Local Setup
 
-1. Open http://localhost:3000
-2. Create a Chat or Coding room
-3. Share room ID with another user
-4. Join from second tab/device
-5. Collaborate in real-time
-6. End room manually or wait for expiry
+### 1. Clone
+
+```bash
+git clone https://github.com/Sneh5824/Mini-Project.git
+cd "Mini Project"
+```
+
+### 2. Install dependencies
+
+```bash
+cd backend
+npm install
+
+cd ../frontend
+npm install
+```
+
+### 3. Start Redis
+
+Docker:
+
+```bash
+docker compose up -d
+```
+
+Or local:
+
+```bash
+redis-server
+```
+
+### 4. Start backend
+
+```bash
+cd backend
+npm run dev
+```
+
+Backend: http://localhost:5001
+
+### 5. Start frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+Frontend: http://localhost:3000
+
+## API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/rooms` | Create private room |
+| GET | `/api/rooms/:roomId` | Fetch room metadata / validate room |
+| GET | `/api/public-rooms` | List active system public rooms |
+| POST | `/api/run` | Execute code snippet (supported languages) |
+| GET | `/health` | Health check |
+
+## Socket Events
+
+### Client -> Server
+
+| Event | Purpose |
+| --- | --- |
+| `join_room` | Join active room |
+| `send_message` | Send text/attachment/reply message |
+| `typing_status` | Update typing indicator |
+| `toggle_reaction` | React/unreact to message |
+| `code_update` | Sync coding editor text |
+| `cursor_update` | Broadcast collaborative cursor/selection |
+| `share_problem` | Share coding problem link |
+| `end_room` | End room (host-only private rooms) |
+
+### Server -> Client
+
+| Event | Purpose |
+| --- | --- |
+| `room_joined` | Initial room payload |
+| `receive_message` | New message delivered |
+| `typing_update` | Typing status changes |
+| `reaction_updated` | Message reaction updates |
+| `code_updated` | Shared code changes |
+| `cursor_updated` | Remote cursor update |
+| `cursor_removed` | Remove remote cursor |
+| `participants_update` | Participant list updates |
+| `user_joined` | Join system message |
+| `user_left` | Leave system message |
+| `problem_shared` | Problem link update |
+| `room_expired` | Room expired and cleaned up |
+| `room_error` | Room operation error |
+
+## Redis Key Schema
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `room:{roomId}` | String | Room metadata |
+| `participants:{roomId}` | List | Current participants |
+| `messages:{roomId}` | List | Chat history while room is active |
+| `code:{roomId}` | String | Shared code content |
+
+## Notes
+
+- Public room IDs are fixed for routing convenience, but names are random per cycle.
+- Room data is ephemeral and deleted on expiry.
+- Some external links may block iframe preview due to browser security headers.
 
 ## Troubleshooting
 
-### Backend `npm run dev` fails
+### Backend does not start
 
 - Ensure Redis is running
-- Reinstall dependencies:
+- Reinstall and retry:
 
 ```bash
 cd backend
@@ -197,9 +189,7 @@ npm ci
 npm run dev
 ```
 
-### Frontend `npm run dev` fails
-
-- Reinstall dependencies:
+### Frontend does not start
 
 ```bash
 cd frontend
@@ -207,11 +197,9 @@ npm ci
 npm run dev
 ```
 
-### VS Code shows `Unknown at rule @tailwind`
+### Tailwind at-rule warning in VS Code
 
-This is an editor linting warning, not a runtime/build error.
-
-Use this in `.vscode/settings.json`:
+This is editor lint noise only. Add:
 
 ```json
 {

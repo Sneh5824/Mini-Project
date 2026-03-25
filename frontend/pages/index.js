@@ -31,6 +31,9 @@ export default function Home() {
   const [joining,  setJoining]  = useState(false);
   const [joinErr,  setJoinErr]  = useState("");
   const [tab,      setTab]      = useState("create");
+  const [publicRooms, setPublicRooms] = useState([]);
+  const [publicLoading, setPublicLoading] = useState(false);
+  const [publicErr, setPublicErr] = useState("");
 
   useEffect(() => {
     setIdentity(getOrCreateIdentity());
@@ -91,6 +94,38 @@ export default function Home() {
     await handleJoinById(joinId);
   };
 
+  const loadPublicRooms = useCallback(async () => {
+    setPublicLoading(true);
+    setPublicErr("");
+    try {
+      const res = await fetch(`${BACKEND}/api/public-rooms`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load public rooms.");
+      }
+      const data = await res.json();
+      setPublicRooms(Array.isArray(data.rooms) ? data.rooms : []);
+    } catch (err) {
+      setPublicErr(err.message || "Unable to load public rooms.");
+    } finally {
+      setPublicLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "public") return;
+    loadPublicRooms();
+    const timer = setInterval(loadPublicRooms, 15000);
+    return () => clearInterval(timer);
+  }, [tab, loadPublicRooms]);
+
+  const formatRemaining = (expiresAt) => {
+    const ms = Number(expiresAt || 0) - Date.now();
+    if (ms <= 0) return "expiring";
+    const min = Math.ceil(ms / 60000);
+    return `${min}m left`;
+  };
+
   useEffect(() => {
     if (!router.isReady || !identity || autoJoinDoneRef.current) return;
 
@@ -120,7 +155,7 @@ export default function Home() {
       <div className="min-h-screen bg-[#07070e] flex flex-col lg:flex-row overflow-hidden">
 
         {/* LEFT — Poster Hero */}
-        <div className="relative flex-1 flex flex-col justify-between px-10 py-10 lg:py-12 overflow-hidden select-none min-h-[52vh] lg:min-h-screen">
+        <div className="relative flex-1 flex flex-col justify-between px-5 sm:px-8 lg:px-10 py-8 sm:py-10 lg:py-12 overflow-hidden select-none min-h-[48vh] lg:min-h-screen">
 
           <div className="film-grain" />
           <div className="scan-line" />
@@ -188,18 +223,18 @@ export default function Home() {
         </div>
 
         {/* RIGHT — Action Panel */}
-        <div className="w-full lg:w-[420px] flex flex-col" style={{ background: "linear-gradient(180deg,#0e0e1c 0%,#0a0a14 100%)", borderLeft: "1px solid rgba(255,255,255,0.045)" }}>
+        <div className="w-full lg:w-[420px] flex flex-col min-h-[52vh] lg:min-h-screen" style={{ background: "linear-gradient(180deg,#0e0e1c 0%,#0a0a14 100%)", borderLeft: "1px solid rgba(255,255,255,0.045)" }}>
 
           <div className="flex flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.055)" }}>
-            {[{ id: "create", label: "Create Room" }, { id: "join", label: "Join Room" }].map(({ id, label }) => (
-              <button key={id} onClick={() => setTab(id)} className="flex-1 relative py-4 text-xs font-semibold uppercase tracking-[0.18em] transition-colors duration-200" style={{ color: tab === id ? "#fff" : "rgba(255,255,255,0.22)" }}>
+            {[{ id: "create", label: "Create Room" }, { id: "join", label: "Join Room" }, { id: "public", label: "Public Rooms" }].map(({ id, label }) => (
+              <button key={id} onClick={() => setTab(id)} className="flex-1 relative py-3.5 sm:py-4 px-1 text-[10px] sm:text-xs font-semibold uppercase tracking-[0.12em] sm:tracking-[0.18em] transition-colors duration-200" style={{ color: tab === id ? "#fff" : "rgba(255,255,255,0.22)" }}>
                 {label}
                 {tab === id && <span className="tab-bar" />}
               </button>
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-7 flex flex-col gap-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-7 flex flex-col gap-5 sm:gap-6">
 
             {tab === "create" && (
               <>
@@ -231,7 +266,7 @@ export default function Home() {
             {tab === "join" && (
               <>
                 <Field label="Room ID">
-                  <input className="blip-input font-mono text-xl tracking-[0.3em] uppercase text-center" placeholder="AB3Z9K" maxLength={6} value={joinId} onChange={(e) => { setJoinId(e.target.value.toUpperCase()); setJoinErr(""); }} onKeyDown={(e) => e.key === "Enter" && handleJoin()} autoComplete="off" spellCheck={false} />
+                  <input className="blip-input font-mono text-lg sm:text-xl tracking-[0.18em] sm:tracking-[0.3em] uppercase text-center" placeholder="AB3Z9K" maxLength={6} value={joinId} onChange={(e) => { setJoinId(e.target.value.toUpperCase()); setJoinErr(""); }} onKeyDown={(e) => e.key === "Enter" && handleJoin()} autoComplete="off" spellCheck={false} />
                 </Field>
                 {joinErr && <Err>{joinErr}</Err>}
                 <button onClick={handleJoin} disabled={joining || !joinId.trim() || !identity} className="blip-btn-gold">
@@ -253,9 +288,61 @@ export default function Home() {
                 )}
               </>
             )}
+
+            {tab === "public" && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.3)" }}>
+                    Open Rooms (10m / 20m)
+                  </p>
+                  <button onClick={loadPublicRooms} className="text-xs px-2 py-1 rounded" style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.72)" }}>
+                    Refresh
+                  </button>
+                </div>
+
+                {publicErr && <Err>{publicErr}</Err>}
+
+                {publicLoading ? (
+                  <p className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>Loading public rooms…</p>
+                ) : publicRooms.length === 0 ? (
+                  <p className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>No active public rooms right now.</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {publicRooms.map((room) => (
+                      <div
+                        key={room.roomId}
+                        className="px-3 py-3 rounded-xl"
+                        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold truncate" style={{ color: "rgba(255,255,255,0.85)" }}>{room.roomName || "Public Chat"}</p>
+                            <p className="text-[11px] mt-0.5" style={{ color: "rgba(255,255,255,0.38)" }}>
+                              {room.participantCount} online · {formatRemaining(room.expiresAt)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleJoinById(room.roomId)}
+                            disabled={joining || !identity}
+                            className="w-full sm:w-auto px-2.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider disabled:opacity-50"
+                            style={{ background: "rgba(220,38,38,0.18)", color: "#fecaca", border: "1px solid rgba(220,38,38,0.35)" }}
+                          >
+                            Join
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-xs mt-auto" style={{ color: "rgba(255,255,255,0.26)" }}>
+                  Anyone can join these rooms without invitation code. Rooms auto-delete when timer ends.
+                </p>
+              </>
+            )}
           </div>
 
-          <div className="flex-shrink-0 flex items-center justify-between px-7 py-3" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-7 py-3" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
             <span className="text-[10px] uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.14)" }}>No data. No trace.</span>
             <span className="text-[10px] tracking-[0.25em]" style={{ color: "rgba(255,255,255,0.14)", fontFamily: "'Bebas Neue','Barlow Condensed',sans-serif" }}>BLIP</span>
           </div>

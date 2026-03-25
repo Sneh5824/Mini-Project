@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const QUICK_REACTIONS = ["👍", "🔥", "😂", "👏", "💡"];
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
@@ -21,12 +21,75 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function linkify(text) {
+function getYouTubeEmbedUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      if (url.pathname === "/watch") {
+        const id = url.searchParams.get("v");
+        return id ? `https://www.youtube.com/embed/${id}` : null;
+      }
+      if (url.pathname.startsWith("/shorts/")) {
+        const id = url.pathname.split("/")[2];
+        return id ? `https://www.youtube.com/embed/${id}` : null;
+      }
+      if (url.pathname.startsWith("/embed/")) {
+        const id = url.pathname.split("/")[2];
+        return id ? `https://www.youtube.com/embed/${id}` : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isImageUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function getLinkPreviewType(rawUrl) {
+  if (getYouTubeEmbedUrl(rawUrl)) return "youtube";
+  if (isImageUrl(rawUrl)) return "image";
+  return "web";
+}
+
+function canUseSidePreview() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function linkify(text, onLinkClick = null) {
   // Simple URL detection — for problem links
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   return text.split(urlRegex).map((part, i) =>
     /^https?:\/\//.test(part) ? (
-      <a key={i} href={part} target="_blank" rel="noreferrer" className="text-red-400 underline underline-offset-2 hover:text-white break-all">
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noreferrer"
+        className="text-red-400 underline underline-offset-2 hover:text-white break-all"
+        onClick={(e) => {
+          if (!onLinkClick) return;
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          if (!canUseSidePreview()) return;
+          e.preventDefault();
+          onLinkClick(part);
+        }}
+      >
         {part}
       </a>
     ) : part
@@ -56,7 +119,7 @@ function pickAudioMimeType() {
 }
 
 // ── Message Bubble ──────────────────────────────────────────────────────────
-function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }) {
+function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId, onOpenLinkPreview }) {
   if (msg.type === "system") {
     return (
       <div className="flex justify-center my-1">
@@ -79,6 +142,13 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
             target="_blank"
             rel="noreferrer"
             className="text-sm text-white underline underline-offset-2 hover:text-red-300 break-all"
+            onClick={(e) => {
+              if (!onOpenLinkPreview) return;
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              if (!canUseSidePreview()) return;
+              e.preventDefault();
+              onOpenLinkPreview(msg.content);
+            }}
           >
             {msg.content}
           </a>
@@ -182,7 +252,7 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
             )}
 
             {msg.content ? (
-              <p className="text-sm leading-relaxed mt-2">{linkify(msg.content)}</p>
+              <p className="text-sm leading-relaxed mt-2">{linkify(msg.content, onOpenLinkPreview)}</p>
             ) : null}
           </div>
 
@@ -238,7 +308,7 @@ function MessageBubble({ msg, isOwn, onReply, onToggleReaction, currentGuestId }
               </p>
             </div>
           )}
-          {linkify(msg.content)}
+          {linkify(msg.content, onOpenLinkPreview)}
         </div>
         <div className={`flex items-center gap-1.5 mt-0.5 mx-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
           <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.18)" }}>{formatTime(msg.timestamp)}</span>
@@ -313,6 +383,8 @@ export default function ChatPanel({
   const [isRecording, setIsRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
   const [micLevel, setMicLevel] = useState(0);
+  const [linkPreview, setLinkPreview] = useState(null);
+  const [linkPreviewWidth, setLinkPreviewWidth] = useState(360);
   const bottomRef = useRef(null);
   const typingRef = useRef(false);
   const idleTimerRef = useRef(null);
@@ -326,6 +398,7 @@ export default function ChatPanel({
   const analyserRef = useRef(null);
   const sourceNodeRef = useRef(null);
   const meterRafRef = useRef(null);
+  const previewDragHandlersRef = useRef({ onMove: null, onUp: null });
 
   // Auto-scroll to bottom on new message
   useEffect(() => {
@@ -347,6 +420,12 @@ export default function ChatPanel({
       }
       if (recordStreamRef.current) {
         recordStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (previewDragHandlersRef.current.onMove) {
+        window.removeEventListener("mousemove", previewDragHandlersRef.current.onMove);
+      }
+      if (previewDragHandlersRef.current.onUp) {
+        window.removeEventListener("mouseup", previewDragHandlersRef.current.onUp);
       }
     };
   }, [onTypingChange]);
@@ -589,10 +668,60 @@ export default function ChatPanel({
     stopMicMeter();
   };
 
+  const openLinkPreview = useCallback((url) => {
+    if (!url || typeof url !== "string") return;
+    const cleanUrl = url.trim();
+    if (!/^https?:\/\//i.test(cleanUrl)) return;
+
+    const type = getLinkPreviewType(cleanUrl);
+    const embedUrl = type === "youtube" ? getYouTubeEmbedUrl(cleanUrl) : cleanUrl;
+    let title = cleanUrl;
+    try {
+      title = new URL(cleanUrl).hostname.replace(/^www\./, "");
+    } catch {
+      // Keep raw URL as title on parsing error.
+    }
+
+    setLinkPreview({
+      url: cleanUrl,
+      type,
+      embedUrl,
+      title,
+    });
+  }, []);
+
+  const beginLinkPreviewResize = useCallback((e) => {
+    if (typeof window === "undefined") return;
+    e.preventDefault();
+
+    const startX = e.clientX;
+    const startWidth = linkPreviewWidth;
+
+    const onMove = (ev) => {
+      const delta = startX - ev.clientX;
+      const maxByViewport = Math.max(320, window.innerWidth - 220);
+      const next = Math.max(280, Math.min(760, Math.min(maxByViewport, startWidth + delta)));
+      setLinkPreviewWidth(next);
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      previewDragHandlersRef.current = { onMove: null, onUp: null };
+    };
+
+    previewDragHandlersRef.current = { onMove, onUp };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [linkPreviewWidth]);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
+      <div
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5"
+        style={linkPreview ? { paddingRight: linkPreviewWidth + 24 } : undefined}
+      >
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <p className="text-sm" style={{ color: "rgba(255,255,255,0.18)" }}>No messages yet. Start the conversation.</p>
@@ -606,6 +735,7 @@ export default function ChatPanel({
               currentGuestId={currentGuestId}
               onToggleReaction={onToggleReaction}
               onReply={(sourceMsg) => setReplyTarget(sourceMsg)}
+              onOpenLinkPreview={openLinkPreview}
             />
           ))
         )}
@@ -761,6 +891,77 @@ export default function ChatPanel({
           </svg>
         </button>
       </div>
+
+      {linkPreview && (
+        <aside
+          className="hidden lg:flex flex-col absolute inset-y-0 right-0"
+          style={{
+            width: linkPreviewWidth,
+            borderLeft: "1px solid rgba(255,255,255,0.08)",
+            background: "#090913",
+          }}
+        >
+          <button
+            type="button"
+            onMouseDown={beginLinkPreviewResize}
+            className="absolute -left-1 top-0 bottom-0 w-2 cursor-col-resize group"
+            title="Drag to resize preview panel"
+            aria-label="Resize link preview panel"
+          >
+            <span className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-transparent group-hover:bg-red-400/80 transition-colors" />
+          </button>
+
+          <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.42)" }}>Link Preview</p>
+              <p className="text-xs truncate" style={{ color: "rgba(255,255,255,0.8)" }}>{linkPreview.title}</p>
+            </div>
+            <a
+              href={linkPreview.url}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-[11px] px-2 py-1 rounded"
+              style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.8)" }}
+            >
+              Open
+            </a>
+            <button
+              onClick={() => setLinkPreview(null)}
+              className="text-[11px] px-2 py-1 rounded"
+              style={{ background: "rgba(220,38,38,0.2)", color: "#fecaca" }}
+              title="Close preview"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 p-2">
+            {linkPreview.type === "youtube" ? (
+              <iframe
+                src={linkPreview.embedUrl}
+                title="YouTube preview"
+                className="w-full h-full rounded-lg"
+                style={{ border: "1px solid rgba(255,255,255,0.08)", background: "#000" }}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : linkPreview.type === "image" ? (
+              <div className="w-full h-full rounded-lg overflow-hidden flex items-center justify-center" style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)" }}>
+                <img src={linkPreview.embedUrl} alt="Link preview" className="max-w-full max-h-full object-contain" />
+              </div>
+            ) : (
+              <iframe
+                src={linkPreview.embedUrl}
+                title="Website preview"
+                className="w-full h-full rounded-lg"
+                style={{ border: "1px solid rgba(255,255,255,0.08)", background: "#05050b" }}
+                sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

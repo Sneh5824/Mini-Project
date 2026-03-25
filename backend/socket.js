@@ -33,7 +33,8 @@ module.exports = (io) => {
           return;
         }
 
-        const isHost = room.hostId === guestId;
+        const hasHostRole = Boolean(room.hostId);
+        const isHost = hasHostRole && room.hostId === guestId;
         const role   = isHost ? "host" : "member";
 
         // Remove any stale entry for this guestId (reconnect scenario)

@@ -197,6 +197,13 @@ body.resizing-row * {
   letter-spacing: 0.04em;
   display: block;
 }
+
+@media (max-width: 640px) {
+  .poster-line {
+    font-size: clamp(2.2rem, 13vw, 3.8rem);
+    letter-spacing: 0.025em;
+  }
+}
 .poster-char {
   display: inline-block;
   opacity: 0;

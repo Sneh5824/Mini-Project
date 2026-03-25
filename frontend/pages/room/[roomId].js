@@ -121,7 +121,7 @@ export default function RoomPage() {
       setTypingUsers([]);
       setRemoteCursors({});
       setCode(code || "");
-      setIsHost(host || isRoomHost(roomId));
+      setIsHost((room?.visibility || "private") === "public" ? false : (host || isRoomHost(roomId)));
       if (room.problemLink) setProbLink(room.problemLink);
       setStatus(STATUS.ACTIVE);
     };
@@ -456,6 +456,7 @@ export default function RoomPage() {
   }
 
   const isCoding = room?.roomType === "coding";
+  const isPublicRoom = (room?.visibility || "private") === "public";
 
   /* ── Render: Active room ─────────────────────────────────────────────── */
   return (
@@ -482,7 +483,7 @@ export default function RoomPage() {
 
       <div className="h-screen flex flex-col overflow-hidden" style={{ background: "#07070e" }}>
         {/* ── Header ────────────────────────────────────────────────────── */}
-        <header className="flex-none h-14 flex items-center gap-3 px-4" style={{ background: "#0a0a14", borderBottom: "1px solid rgba(255,255,255,0.055)" }}>
+        <header className="flex-none min-h-14 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 md:py-0 flex-wrap md:flex-nowrap" style={{ background: "#0a0a14", borderBottom: "1px solid rgba(255,255,255,0.055)" }}>
           {/* Logo */}
           <button onClick={goHome} className="flex items-center gap-2 group flex-shrink-0">
             <span className="w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-opacity group-hover:opacity-75" style={{ background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", fontFamily: "'Bebas Neue','Barlow Condensed',sans-serif", letterSpacing: "0.05em" }}>B</span>
@@ -492,18 +493,20 @@ export default function RoomPage() {
           <div className="w-px h-5 mx-1 flex-shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
 
           {/* Invite link */}
-          <button
-            onClick={copyInviteLink}
-            className="flex items-center gap-1.5 transition-colors flex-shrink-0 hover:text-white"
-            style={{ color: inviteCopied ? "#34d399" : "rgba(255,255,255,0.35)" }}
-            title="Copy Invite Link"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M12.59 7.41a1 1 0 010 1.41L10.41 11a1 1 0 01-1.41-1.41l2.17-2.18a1 1 0 011.42 0z" />
-              <path d="M6.88 13.12a3 3 0 010-4.24l2.12-2.12a3 3 0 114.24 4.24l-.7.7a1 1 0 11-1.42-1.41l.7-.7a1 1 0 10-1.41-1.42L8.29 10.3a1 1 0 001.41 1.41 1 1 0 111.42 1.41 3 3 0 01-4.24 0z" />
-            </svg>
-            <span className="text-xs font-medium">{inviteCopied ? "Copied" : "Invite"}</span>
-          </button>
+          {!isPublicRoom && (
+            <button
+              onClick={copyInviteLink}
+              className="flex items-center gap-1.5 transition-colors flex-shrink-0 hover:text-white"
+              style={{ color: inviteCopied ? "#34d399" : "rgba(255,255,255,0.35)" }}
+              title="Copy Invite Link"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M12.59 7.41a1 1 0 010 1.41L10.41 11a1 1 0 01-1.41-1.41l2.17-2.18a1 1 0 011.42 0z" />
+                <path d="M6.88 13.12a3 3 0 010-4.24l2.12-2.12a3 3 0 114.24 4.24l-.7.7a1 1 0 11-1.42-1.41l.7-.7a1 1 0 10-1.41-1.42L8.29 10.3a1 1 0 001.41 1.41 1 1 0 111.42 1.41 3 3 0 01-4.24 0z" />
+              </svg>
+              <span className="text-xs font-medium hidden sm:inline">{inviteCopied ? "Copied" : "Invite"}</span>
+            </button>
+          )}
 
           {/* Room ID + copy */}
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -533,6 +536,12 @@ export default function RoomPage() {
             {isCoding ? "Coding" : "Chat"}
           </span>
 
+          {isPublicRoom && (
+            <span className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7" }}>
+              Public
+            </span>
+          )}
+
           <div className="flex-1" />
 
           {/* Timer */}
@@ -542,7 +551,7 @@ export default function RoomPage() {
             </div>
           )}
 
-          <div className="w-px h-5 mx-1 flex-shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
+          <div className="w-px h-5 mx-1 flex-shrink-0 hidden md:block" style={{ background: "rgba(255,255,255,0.07)" }} />
 
           {/* Participant count */}
           <button
