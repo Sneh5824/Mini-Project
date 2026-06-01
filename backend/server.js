@@ -22,6 +22,38 @@ const SYSTEM_PUBLIC_ROOM_SPECS = [
   { roomId: "PUB20M", timeout: 20 },
 ];
 
+// Simple in-memory admin sessions (token -> expiresAt)
+const crypto = require("crypto");
+const adminSessions = new Map();
+const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60; // 1 hour
+
+function createAdminSession() {
+  const token = crypto.randomBytes(24).toString("hex");
+  const expiresAt = Date.now() + ADMIN_SESSION_TTL_MS;
+  adminSessions.set(token, expiresAt);
+  return { token, expiresAt };
+}
+
+function validateAdminToken(token) {
+  if (!token) return false;
+  const exp = adminSessions.get(token);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    adminSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function requireAdmin(req, res, next) {
+  const h = req.get("authorization") || "";
+  const parts = h.split(" ");
+  if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") return res.status(401).json({ error: "Unauthorized" });
+  const token = parts[1];
+  if (!validateAdminToken(token)) return res.status(401).json({ error: "Invalid or expired admin token" });
+  next();
+}
+
 // ─── REST API ────────────────────────────────────────────────────────────────
 
 // POST /api/rooms  — create a new room
@@ -128,6 +160,103 @@ app.get("/api/public-rooms", async (_req, res) => {
   }
 });
 
+// ─── Admin API ─────────────────────────────────────────────────────────────
+// POST /api/admin/login  — exchange password for admin token (set ADMIN_PASSWORD in env)
+app.post("/api/admin/login", async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    const expected = process.env.ADMIN_PASSWORD;
+    if (!expected) return res.status(500).json({ error: "Admin login not configured on server." });
+    if (!password || password !== expected) return res.status(401).json({ error: "Invalid credentials." });
+    const sess = createAdminSession();
+    res.json({ token: sess.token, expiresAt: sess.expiresAt });
+  } catch (err) {
+    console.error("[API] POST /api/admin/login error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// GET /api/admin/stats  — basic site statistics
+app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
+  try {
+    const roomKeys = await redis.keys("room:*");
+    const now = Date.now();
+    let activeRooms = 0, publicRooms = 0, totalParticipants = 0, totalMessages = 0;
+
+    for (const rk of roomKeys) {
+      const raw = await redis.get(rk);
+      if (!raw) continue;
+      const room = JSON.parse(raw);
+      if (!room || room.status !== "active" || Number(room.expiresAt || 0) <= now) continue;
+      activeRooms++;
+      if ((room.visibility || "private") === "public") publicRooms++;
+      const pid = `participants:${room.roomId}`;
+      try { totalParticipants += await redis.lLen(pid); } catch (_) {}
+      try { totalMessages += await redis.lLen(`messages:${room.roomId}`); } catch (_) {}
+    }
+
+    res.json({ activeRooms, publicRooms, totalParticipants, totalMessages });
+  } catch (err) {
+    console.error("[API] GET /api/admin/stats error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// Admin: list all public rooms (including admin-created ones)
+app.get("/api/admin/public-rooms", requireAdmin, async (_req, res) => {
+  try {
+    const roomKeys = await redis.keys("room:*");
+    const now = Date.now();
+    const rooms = [];
+    for (const rk of roomKeys) {
+      const raw = await redis.get(rk);
+      if (!raw) continue;
+      const room = JSON.parse(raw);
+      if (!room || room.status !== "active" || Number(room.expiresAt || 0) <= now) continue;
+      if ((room.visibility || "private") !== "public") continue;
+      const parts = await sm.getParticipants(room.roomId);
+      rooms.push({ roomId: room.roomId, roomName: room.roomName, timeout: room.timeout, createdAt: room.createdAt, expiresAt: room.expiresAt, participantCount: parts.length });
+    }
+    res.json({ rooms });
+  } catch (err) {
+    console.error("[API] GET /api/admin/public-rooms error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// Admin: create a public room
+app.post("/api/admin/public-rooms", requireAdmin, async (req, res) => {
+  try {
+    const { timeout = 10, roomName = null, roomId = null, roomType = "chat" } = req.body || {};
+    const validTimeouts = [10, 20, 30, 60];
+    if (!validTimeouts.includes(Number(timeout))) return res.status(400).json({ error: "Invalid timeout." });
+    const room = await sm.createRoom({ hostId: null, hostName: null, roomType, timeout: Number(timeout), visibility: "public", roomName: roomName || null, roomId: roomId || null });
+    const delay = Number(room.expiresAt) - Date.now();
+    sm.setRoomTimer(room.roomId, delay, async () => { await expireRoomREST(io, room.roomId); });
+    res.status(201).json(room);
+  } catch (err) {
+    console.error("[API] POST /api/admin/public-rooms error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// Admin: delete a public room
+app.delete("/api/admin/public-rooms/:roomId", requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.roomId.toUpperCase();
+    const room = await sm.getRoom(id);
+    if (!room) return res.status(404).json({ error: "Room not found." });
+    if ((room.visibility || "private") !== "public") return res.status(400).json({ error: "Not a public room." });
+    sm.clearRoomTimer(id);
+    await sm.deleteRoom(id);
+    io.to(id).emit("room_expired", { message: "This public room has been removed by an admin." });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[API] DELETE /api/admin/public-rooms/:roomId error:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 async function ensureSystemPublicRoom(io, spec) {
   const existing = await sm.getRoom(spec.roomId);
   const now = Date.now();
@@ -189,7 +318,6 @@ const { spawnSync } = require("child_process");
 const fs   = require("fs");
 const os   = require("os");
 const path = require("path");
-const crypto = require("crypto");
 
 const EXEC_TIMEOUT = 10000; // 10 seconds
 
@@ -323,6 +451,13 @@ require("./socket")(io);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
+// Log listen errors and exit gracefully so nodemon can restart cleanly
+server.on("error", (err) => {
+  console.error("[Server] listen error", err);
+  // exit with non-zero so process managers / nodemon know it failed
+  process.exit(1);
+});
+
 server.listen(PORT, async () => {
   try {
     await initializeSystemPublicRooms(io);
